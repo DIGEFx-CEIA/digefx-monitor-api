@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime
+from sqlalchemy import Boolean, create_engine, Column, Integer, String, Float, DateTime
 from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime
 from sqlalchemy.orm import sessionmaker
@@ -29,7 +29,19 @@ class DeviceStatus(Base):
     relay1_time = Column(Float)
     relay2_status = Column(String)
     relay2_time = Column(Float)
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
+    
+class HostStatus(Base):
+    __tablename__ = "host_status"
+    id = Column(Integer, primary_key=True, index=True)
+    host_ip = Column(String, index=True)
+    public_ip = Column(String)
+    cpu_usage = Column(Float)
+    ram_usage = Column(Float)
+    disk_usage = Column(Float)
+    temperature = Column(Float)
+    online = Column(Boolean, default=False)
+    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
 
 # Criação do banco de dados e da tabela
 Base.metadata.create_all(bind=engine)

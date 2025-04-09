@@ -1,11 +1,15 @@
+import socket
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
 from passlib.context import CryptContext
-from pydantic.v1 import BaseModel, Extra
+import psutil
+from pydantic import BaseModel, Extra
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
+import requests
 from sqlalchemy.orm import Session
-from models import User, SessionLocal, DeviceStatus
+from models import HostStatus, User, SessionLocal, DeviceStatus
+from schemas import DeviceStatusResponse, HostStatusResponse, StatusResponse
 import serial
 import paho.mqtt.client as mqtt
 import threading
@@ -32,7 +36,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
 # Serial communication configuration
-SERIAL_PORT = "/dev/ttyUSB1"  # Update this according to your system
+SERIAL_PORT = "/dev/ttyUSB0"  # Update this according to your system
 BAUD_RATE = 115200
 serial_lock = threading.Lock()  # Lock for serial access
 
@@ -151,9 +155,82 @@ def process_serial_data(data):
 
     # Send acknowledgment back to ESP32
     ser.write(b'ACK\n')
+    
+def is_connected(host="8.8.8.8", port=53, timeout=3):
+    try:
+        socket.setdefaulttimeout(timeout)
+        socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect((host, port))
+        return True
+    except socket.error:
+        return False
+
+def get_public_ip():
+    try:
+        response = requests.get("https://api.ipify.org", timeout=3)
+        return response.text
+    except requests.RequestException:
+        return None    
+    
+def get_cpu_temperature():
+    if not hasattr(psutil, "sensors_temperatures"):
+        return None
+
+    temps = psutil.sensors_temperatures()
+    if not temps:
+        return None
+
+    # Sensores preferenciais por arquitetura
+    cpu_sensor_keys = ["coretemp", "k10temp", "cpu_thermal", "acpitz"]
+
+    for key in cpu_sensor_keys:
+        if key in temps:
+            for entry in temps[key]:
+                if entry.label in ("Tctl", "Tdie", "Package id 0", "Core 0", ""):
+                    return entry.current
+
+    # Fallback: primeira temperatura válida
+    for sensor_entries in temps.values():
+        for entry in sensor_entries:
+            if hasattr(entry, "current"):
+                return entry.current
+
+    return None
+
+def monitor_host():
+    while True:
+        try:
+            cpu = psutil.cpu_percent(interval=1)
+            ram = psutil.virtual_memory().percent
+            disk = psutil.disk_usage('/').percent
+
+            # IP do host
+            hostname = socket.gethostname()
+            ip_address = socket.gethostbyname(hostname)
+
+            db = SessionLocal()
+            status = HostStatus(
+                host_ip=ip_address,
+                public_ip=get_public_ip(),
+                cpu_usage=cpu,
+                ram_usage=ram,
+                disk_usage=disk,
+                online=is_connected(),
+                temperature=get_cpu_temperature()
+            )
+            db.add(status)
+            db.commit()
+            db.close()
+
+        except Exception as e:
+            print(f"[HOST MONITOR] Erro: {e}")
+
+        time.sleep(10)
+
 
 # Start serial reading in background
 threading.Thread(target=read_serial_data, daemon=True).start()
+# Start host monitoring in background
+threading.Thread(target=monitor_host, daemon=True).start()
 
 # Login route
 @app.post("/login")
@@ -191,20 +268,33 @@ def configure(config: SerialConfig, current_user: User = Depends(get_current_use
     return {"status": "Configuration sent", **config_dict}
 
 # Protected route to fetch current device status
-@app.get("/status")
+@app.get("/status", response_model=StatusResponse)
 def get_device_status(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    status = db.query(DeviceStatus).order_by(DeviceStatus.timestamp.desc()).first()
-    if not status:
+    device_status = db.query(DeviceStatus).order_by(DeviceStatus.timestamp.desc()).first()
+    host_status = db.query(HostStatus).order_by(HostStatus.timestamp.desc()).first()
+    if not device_status and not host_status:
         raise HTTPException(status_code=404, detail="No status available")
 
     return {
-        "device_id": status.device_id,
-        "ignition": status.ignition,
-        "battery_voltage": status.battery_voltage,
-        "min_voltage": status.min_voltage,
-        "relay1_status": status.relay1_status,
-        "relay2_status": status.relay2_status,
-        "relay1_time": status.relay1_time,
-        "relay2_time": status.relay2_time,
-        "timestamp": status.timestamp
+        "device_status": DeviceStatusResponse(
+            device_id=device_status.device_id,
+            ignition=device_status.ignition,
+            battery_voltage=device_status.battery_voltage,
+            min_voltage=device_status.min_voltage,
+            relay1_status=device_status.relay1_status,
+            relay2_status=device_status.relay2_status,
+            relay1_time=device_status.relay1_time,
+            relay2_time=device_status.relay2_time,
+            timestamp=device_status.timestamp
+        ) if device_status else None,
+        "host_status": HostStatusResponse(
+            host_ip=host_status.host_ip,
+            public_ip=host_status.public_ip,
+            cpu_usage=host_status.cpu_usage,
+            ram_usage=host_status.ram_usage,
+            disk_usage=host_status.disk_usage,
+            temperature=host_status.temperature,
+            online=host_status.online,
+            timestamp=host_status.timestamp
+        ) if host_status else None
     }
