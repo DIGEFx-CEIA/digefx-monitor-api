@@ -12,7 +12,7 @@ class DeviceStatusResponse(BaseModel):
     relay2_status: str
     relay1_time: float
     relay2_time: float
-    timestamp: datetime
+    timestamp: str
 
 class HostStatusResponse(BaseModel):
     host_ip: str
@@ -22,7 +22,7 @@ class HostStatusResponse(BaseModel):
     disk_usage: float
     temperature: Optional[float] = None
     online:bool
-    timestamp: datetime
+    timestamp: str
 
 class CameraStatusResponse(BaseModel):
     camera1_ip: Optional[str]
@@ -33,7 +33,7 @@ class CameraStatusResponse(BaseModel):
     camera3_connected: bool
     camera4_ip: Optional[str]
     camera4_connected: bool
-    timestamp: datetime
+    timestamp: str
 
 class StatusResponse(BaseModel):
     device_status: Optional[DeviceStatusResponse]

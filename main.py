@@ -147,6 +147,7 @@ def process_serial_data(data):
         relay1_time=float(data_dict.get("RELAY1_TIME", 0)),
         relay2_status=data_dict.get("RELAY2", "Off"),
         relay2_time=float(data_dict.get("RELAY2_TIME", 0)),
+        timestamp=datetime.utcnow(),
     )
 
     db = SessionLocal()
@@ -220,7 +221,8 @@ def monitor_host():
                 ram_usage=ram,
                 disk_usage=disk,
                 online=is_connected("8.8.8.8"),
-                temperature=get_cpu_temperature()
+                temperature=get_cpu_temperature(),
+                timestamp=datetime.utcnow(),
             )
             db.add(status)
             db.commit()
@@ -253,6 +255,7 @@ def monitor_cameras():
                 camera3_connected=camera3_connected,
                 camera4_ip=camera4_host,
                 camera4_connected=camera4_connected,
+                timestamp=datetime.utcnow(),
             )
             db.add(camera_status)
             db.commit()
@@ -322,7 +325,7 @@ def get_device_status(current_user: User = Depends(get_current_user), db: Sessio
             relay2_status=device_status.relay2_status,
             relay1_time=device_status.relay1_time,
             relay2_time=device_status.relay2_time,
-            timestamp=device_status.timestamp
+            timestamp=device_status.timestamp.strftime("%Y-%m-%d %H:%M:%S GMT")
         ) if device_status else None,
         "host_status": HostStatusResponse(
             host_ip=host_status.host_ip,
@@ -332,7 +335,7 @@ def get_device_status(current_user: User = Depends(get_current_user), db: Sessio
             disk_usage=host_status.disk_usage,
             temperature=host_status.temperature,
             online=host_status.online,
-            timestamp=host_status.timestamp
+            timestamp=host_status.timestamp.strftime("%Y-%m-%d %H:%M:%S GMT")
         ) if host_status else None,
         "camera_status": CameraStatusResponse(
             camera1_ip=camera_status.camera1_ip,
@@ -343,6 +346,6 @@ def get_device_status(current_user: User = Depends(get_current_user), db: Sessio
             camera3_connected=camera_status.camera3_connected,
             camera4_ip=camera_status.camera4_ip,
             camera4_connected=camera_status.camera4_connected,
-            timestamp=camera_status.timestamp
+            timestamp=camera_status.timestamp.strftime("%Y-%m-%d %H:%M:%S GMT")
         ) if camera_status else None
     }
