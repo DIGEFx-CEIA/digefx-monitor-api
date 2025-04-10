@@ -1,0 +1,34 @@
+# Ignorar dependências locais e cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.db
+
+# Ignorar arquivos temporários
+*.log
+*.swp
+*.tmp
+
+# Ignorar virtualenvs locais
+.venv/
+env/
+venv/
+
+# Ignorar arquivos de controle de versão
+.git/
+.gitignore
+
+# Ignorar configurações de editor
+.vscode/
+.idea/
+
+# Ignorar arquivos de sistema
+.DS_Store
+Thumbs.db
+
+# Ignorar volumes ou dados locais
+data/
+
+# Ignorar arquivos de environment
+.env
