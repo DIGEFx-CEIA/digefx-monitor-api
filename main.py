@@ -1,3 +1,4 @@
+import os
 import socket
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
@@ -8,23 +9,25 @@ from jose import JWTError, jwt
 from datetime import datetime, timedelta
 import requests
 from sqlalchemy.orm import Session
-from models import HostStatus, User, SessionLocal, DeviceStatus
-from schemas import DeviceStatusResponse, HostStatusResponse, StatusResponse
+from models import CameraStatus, HostStatus, User, SessionLocal, DeviceStatus
+from schemas import CameraStatusResponse, DeviceStatusResponse, HostStatusResponse, StatusResponse
 import serial
 import paho.mqtt.client as mqtt
 import threading
 import time
+from dotenv import load_dotenv
 
 # MQTT Configuration
 MQTT_BROKER = "localhost"
 MQTT_PORT = 1883
 MQTT_TOPIC = "device/status"
 
-mqtt_client = mqtt.Client()
-mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
+# mqtt_client = mqtt.Client()
+# mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
 
 # App configuration
 app = FastAPI()
+load_dotenv()
 
 # JWT configuration
 SECRET_KEY = "digefxsecretkey"
@@ -156,7 +159,9 @@ def process_serial_data(data):
     # Send acknowledgment back to ESP32
     ser.write(b'ACK\n')
     
-def is_connected(host="8.8.8.8", port=53, timeout=3):
+def is_connected(host, port=53, timeout=3):
+    if host is None:
+        return False
     try:
         socket.setdefaulttimeout(timeout)
         socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect((host, port))
@@ -214,7 +219,7 @@ def monitor_host():
                 cpu_usage=cpu,
                 ram_usage=ram,
                 disk_usage=disk,
-                online=is_connected(),
+                online=is_connected("8.8.8.8"),
                 temperature=get_cpu_temperature()
             )
             db.add(status)
@@ -226,11 +231,42 @@ def monitor_host():
 
         time.sleep(10)
 
+def monitor_cameras():
+    while True:
+        try:
+            camera1_host = os.getenv('CAMERA_1_HOST')
+            camera1_connected = is_connected(camera1_host,80)
+            camera2_host = os.getenv('CAMERA_2_HOST')
+            camera2_connected = is_connected(camera2_host,80)
+            camera3_host = os.getenv('CAMERA_3_HOST')
+            camera3_connected = is_connected(camera3_host,80)
+            camera4_host = os.getenv('CAMERA_4_HOST')
+            camera4_connected = is_connected(camera4_host,80)
+            # Save camera status to database
+            db = SessionLocal()
+            camera_status = CameraStatus(
+                camera1_ip=camera1_host,
+                camera1_connected=camera1_connected,
+                camera2_ip=camera2_host,
+                camera2_connected=camera2_connected,
+                camera3_ip=camera3_host,
+                camera3_connected=camera3_connected,
+                camera4_ip=camera4_host,
+                camera4_connected=camera4_connected,
+            )
+            db.add(camera_status)
+            db.commit()
+            db.close()
+        except Exception as e:
+            print(f"[CAMERA MONITOR] Erro: {e}")
+
+        time.sleep(10)
 
 # Start serial reading in background
 threading.Thread(target=read_serial_data, daemon=True).start()
 # Start host monitoring in background
 threading.Thread(target=monitor_host, daemon=True).start()
+threading.Thread(target=monitor_cameras, daemon=True).start()
 
 # Login route
 @app.post("/login")
@@ -272,6 +308,7 @@ def configure(config: SerialConfig, current_user: User = Depends(get_current_use
 def get_device_status(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     device_status = db.query(DeviceStatus).order_by(DeviceStatus.timestamp.desc()).first()
     host_status = db.query(HostStatus).order_by(HostStatus.timestamp.desc()).first()
+    camera_status = db.query(CameraStatus).order_by(CameraStatus.timestamp.desc()).first()
     if not device_status and not host_status:
         raise HTTPException(status_code=404, detail="No status available")
 
@@ -296,5 +333,16 @@ def get_device_status(current_user: User = Depends(get_current_user), db: Sessio
             temperature=host_status.temperature,
             online=host_status.online,
             timestamp=host_status.timestamp
-        ) if host_status else None
+        ) if host_status else None,
+        "camera_status": CameraStatusResponse(
+            camera1_ip=camera_status.camera1_ip,
+            camera1_connected=camera_status.camera1_connected,
+            camera2_ip=camera_status.camera2_ip,
+            camera2_connected=camera_status.camera2_connected,
+            camera3_ip=camera_status.camera3_ip,
+            camera3_connected=camera_status.camera3_connected,
+            camera4_ip=camera_status.camera4_ip,
+            camera4_connected=camera_status.camera4_connected,
+            timestamp=camera_status.timestamp
+        ) if camera_status else None
     }

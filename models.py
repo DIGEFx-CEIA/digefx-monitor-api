@@ -43,5 +43,18 @@ class HostStatus(Base):
     online = Column(Boolean, default=False)
     timestamp = Column(DateTime, default=datetime.utcnow, index=True)
 
+class CameraStatus(Base):
+    __tablename__ = "camera_status"
+    id = Column(Integer, primary_key=True, index=True)
+    camera1_ip = Column(String, nullable=True)
+    camera1_connected = Column(Boolean, default=False)
+    camera2_ip = Column(String, nullable=True)
+    camera2_connected = Column(Boolean, default=False)
+    camera3_ip = Column(String, nullable=True)
+    camera3_connected = Column(Boolean, default=False)
+    camera4_ip = Column(String, nullable=True)
+    camera4_connected = Column(Boolean, default=False)
+    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
+
 # Criação do banco de dados e da tabela
 Base.metadata.create_all(bind=engine)
