@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 from pydantic import BaseModel
 
 
@@ -12,7 +12,21 @@ class DeviceStatusResponse(BaseModel):
     relay2_status: str
     relay1_time: float
     relay2_time: float
+    gps_status: str
     timestamp: str
+
+class DeviceLocationResponse(BaseModel):
+    device_id: str
+    latitude: float
+    longitude: float
+    speed: float
+    hdop: float
+    sats: int
+    timestamp: str
+
+class LocationListResponse(BaseModel):
+    locations: List[DeviceLocationResponse]
+    total_count: int
 
 class HostStatusResponse(BaseModel):
     host_ip: str

@@ -9,8 +9,8 @@ from jose import JWTError, jwt
 from datetime import datetime, timedelta
 import requests
 from sqlalchemy.orm import Session
-from models import CameraStatus, HostStatus, User, SessionLocal, DeviceStatus
-from schemas import CameraStatusResponse, DeviceStatusResponse, HostStatusResponse, StatusResponse
+from models import CameraStatus, DeviceLocation, HostStatus, User, SessionLocal, DeviceStatus
+from schemas import CameraStatusResponse, DeviceStatusResponse, HostStatusResponse, StatusResponse, LocationListResponse, DeviceLocationResponse
 import serial
 import paho.mqtt.client as mqtt
 import threading
@@ -79,7 +79,7 @@ class UserCredentials(BaseModel):
     username: str
     password: str
 
-class SerialConfig(BaseModel, extra=Extra.forbid):
+class SerialConfig(BaseModel):
     device_id: str | None = None
     relay1_time: float | None = None
     relay2_time: float | None = None
@@ -125,7 +125,7 @@ def read_serial_data():
             with serial_lock:  # Lock for safe read
                 if ser and ser.in_waiting:
                     line = ser.readline().decode().strip()
-                    if line and line != "ACK":
+                    if line and line != "ACK" and line.startswith("DEVICE_ID"):
                         process_serial_data(line)
         except serial.SerialException as e:
             print(f"Serial Exception: {e}")
@@ -147,11 +147,24 @@ def process_serial_data(data):
         relay1_time=float(data_dict.get("RELAY1_TIME", 0)),
         relay2_status=data_dict.get("RELAY2", "Off"),
         relay2_time=float(data_dict.get("RELAY2_TIME", 0)),
+        gps_status=data_dict.get("GPS_STATUS", "Invalid"),
         timestamp=datetime.utcnow(),
     )
 
+    device_location = DeviceLocation(
+        device_id=data_dict.get("DEVICE_ID", "unknown"),
+        latitude=float(data_dict.get("LAT", 0)),
+        longitude=float(data_dict.get("LNG", 0)),
+        speed=float(data_dict.get("SPEED", 0)),
+        hdop=float(data_dict.get("HDOP", 0)),
+        sats=int(data_dict.get("SATS", 0)),
+        timestamp=datetime.utcnow(),
+    )
+    
+
     db = SessionLocal()
     db.add(device_status)
+    db.add(device_location)
     db.commit()
     db.close()
 
@@ -297,7 +310,7 @@ def register(credentials: UserCredentials, current_user: User = Depends(get_curr
 # Serial configuration route (protected)
 @app.post("/configure")
 def configure(config: SerialConfig, current_user: User = Depends(get_current_user)):
-    config_dict = config.dict(exclude_none=True)
+    config_dict = config.model_dump(exclude_unset=True, exclude_none=True)
     with serial_lock:  # Lock for safe write
         for key, value in config_dict.items():
             ser.write(f"{key.upper()}:{value}\n".encode())
@@ -325,6 +338,7 @@ def get_device_status(current_user: User = Depends(get_current_user), db: Sessio
             relay2_status=device_status.relay2_status,
             relay1_time=device_status.relay1_time,
             relay2_time=device_status.relay2_time,
+            gps_status=device_status.gps_status,
             timestamp=device_status.timestamp.strftime("%Y-%m-%d %H:%M:%S GMT")
         ) if device_status else None,
         "host_status": HostStatusResponse(
@@ -349,3 +363,37 @@ def get_device_status(current_user: User = Depends(get_current_user), db: Sessio
             timestamp=camera_status.timestamp.strftime("%Y-%m-%d %H:%M:%S GMT")
         ) if camera_status else None
     }
+
+# Protected route to fetch device locations for current day
+@app.get("/locations/today", response_model=LocationListResponse)
+def get_today_locations(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Get today's date range (start and end of day)
+    today = datetime.utcnow().date()
+    start_of_day = datetime.combine(today, datetime.min.time())
+    end_of_day = datetime.combine(today, datetime.max.time())
+    
+    # Query locations for today
+    locations = db.query(DeviceLocation).filter(
+        DeviceLocation.timestamp >= start_of_day,
+        DeviceLocation.timestamp <= end_of_day
+    ).order_by(DeviceLocation.timestamp.desc()).all()
+    
+    if not locations:
+        return LocationListResponse(locations=[], total_count=0)
+    
+    location_responses = [
+        DeviceLocationResponse(
+            device_id=location.device_id,
+            latitude=location.latitude,
+            longitude=location.longitude,
+            speed=location.speed,
+            hdop=location.hdop,
+            sats=location.sats,
+            timestamp=location.timestamp.strftime("%Y-%m-%d %H:%M:%S GMT")
+        ) for location in locations
+    ]
+    
+    return LocationListResponse(
+        locations=location_responses,
+        total_count=len(location_responses)
+    )

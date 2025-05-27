@@ -29,6 +29,18 @@ class DeviceStatus(Base):
     relay1_time = Column(Float)
     relay2_status = Column(String)
     relay2_time = Column(Float)
+    gps_status = Column(String)
+    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
+
+class DeviceLocation(Base):
+    __tablename__ = "device_location"
+    id = Column(Integer, primary_key=True, index=True)
+    device_id = Column(String, index=True)
+    latitude = Column(Float)
+    longitude = Column(Float)
+    speed = Column(Float)
+    hdop = Column(Float)
+    sats = Column(Integer)
     timestamp = Column(DateTime, default=datetime.utcnow, index=True)
     
 class HostStatus(Base):
