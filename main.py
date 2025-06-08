@@ -21,6 +21,7 @@ import threading
 import time
 from dotenv import load_dotenv
 from typing import List
+from sqlalchemy import func, and_
 
 # MQTT Configuration
 MQTT_BROKER = "localhost"
@@ -460,8 +461,43 @@ def get_cameras(current_user: User = Depends(get_current_user), db: Session = De
     
     return CameraListResponse(cameras=camera_responses, total_count=len(camera_responses))
 
+# Camera Status Monitoring (moved before /{camera_id} to avoid route conflict)
+@app.get("/cameras/status", response_model=CameraStatusListResponse)
+def get_cameras_status(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Get latest status for all cameras"""
+    # Get the latest status for each camera
+    subquery = db.query(
+        CameraStatus.camera_id,
+        func.max(CameraStatus.timestamp).label('latest_timestamp')
+    ).group_by(CameraStatus.camera_id).subquery()
+    
+    latest_statuses = db.query(CameraStatus).join(
+        subquery,
+        and_(
+            CameraStatus.camera_id == subquery.c.camera_id,
+            CameraStatus.timestamp == subquery.c.latest_timestamp
+        )
+    ).all()
+    
+    status_responses = []
+    for status in latest_statuses:
+        camera = db.query(Camera).filter(Camera.id == status.camera_id).first()
+        if camera:
+            status_responses.append(CameraStatusResponse(
+                camera_id=camera.id,
+                camera_name=camera.name,
+                camera_ip=camera.ip_address,
+                camera_port=camera.port,
+                is_connected=status.is_connected,
+                last_ping_time=status.last_ping_time.strftime("%Y-%m-%d %H:%M:%S GMT") if status.last_ping_time else None,
+                response_time_ms=status.response_time_ms,
+                timestamp=status.timestamp.strftime("%Y-%m-%d %H:%M:%S GMT")
+            ))
+    
+    return CameraStatusListResponse(statuses=status_responses, total_count=len(status_responses))
+
 @app.post("/cameras", response_model=CameraResponse)
-def create_camera(camera: CameraCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def create_camera(camera: CameraCreate, db: Session = Depends(get_db)):
     """Create a new camera"""
     # Check if camera name already exists
     existing_camera = db.query(Camera).filter(Camera.name == camera.name).first()
@@ -564,41 +600,6 @@ def delete_camera(camera_id: int, current_user: User = Depends(get_current_user)
     db.delete(camera)
     db.commit()
     return {"message": "Camera deleted successfully"}
-
-# Camera Status Monitoring
-@app.get("/cameras/status", response_model=CameraStatusListResponse)
-def get_cameras_status(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Get latest status for all cameras"""
-    # Get the latest status for each camera
-    subquery = db.query(
-        CameraStatus.camera_id,
-        db.func.max(CameraStatus.timestamp).label('latest_timestamp')
-    ).group_by(CameraStatus.camera_id).subquery()
-    
-    latest_statuses = db.query(CameraStatus).join(
-        subquery,
-        db.and_(
-            CameraStatus.camera_id == subquery.c.camera_id,
-            CameraStatus.timestamp == subquery.c.latest_timestamp
-        )
-    ).all()
-    
-    status_responses = []
-    for status in latest_statuses:
-        camera = db.query(Camera).filter(Camera.id == status.camera_id).first()
-        if camera:
-            status_responses.append(CameraStatusResponse(
-                camera_id=camera.id,
-                camera_name=camera.name,
-                camera_ip=camera.ip_address,
-                camera_port=camera.port,
-                is_connected=status.is_connected,
-                last_ping_time=status.last_ping_time.strftime("%Y-%m-%d %H:%M:%S GMT") if status.last_ping_time else None,
-                response_time_ms=status.response_time_ms,
-                timestamp=status.timestamp.strftime("%Y-%m-%d %H:%M:%S GMT")
-            ))
-    
-    return CameraStatusListResponse(statuses=status_responses, total_count=len(status_responses))
 
 # Camera Alerts Management
 @app.post("/camera-alerts", response_model=CameraAlertResponse)
