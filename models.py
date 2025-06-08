@@ -1,7 +1,7 @@
-from sqlalchemy import Boolean, create_engine, Column, Integer, String, Float, DateTime
+from sqlalchemy import Boolean, create_engine, Column, Integer, String, Float, DateTime, JSON, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, relationship
 
 # Conexão com o SQLite
 DATABASE_URL = "sqlite:///./data/app.db"
@@ -55,19 +55,85 @@ class HostStatus(Base):
     online = Column(Boolean, default=False)
     timestamp = Column(DateTime, default=datetime.utcnow, index=True)
 
+# Dynamic camera models
+class Camera(Base):
+    __tablename__ = "cameras"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False, unique=True)
+    ip_address = Column(String, nullable=False)
+    port = Column(Integer, default=80)
+    enabled_alerts = Column(JSON)  # List of enabled alert types
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationship with camera status
+    statuses = relationship("CameraStatus", back_populates="camera")
+
 class CameraStatus(Base):
     __tablename__ = "camera_status"
     id = Column(Integer, primary_key=True, index=True)
-    camera1_ip = Column(String, nullable=True)
-    camera1_connected = Column(Boolean, default=False)
-    camera2_ip = Column(String, nullable=True)
-    camera2_connected = Column(Boolean, default=False)
-    camera3_ip = Column(String, nullable=True)
-    camera3_connected = Column(Boolean, default=False)
-    camera4_ip = Column(String, nullable=True)
-    camera4_connected = Column(Boolean, default=False)
+    camera_id = Column(Integer, ForeignKey("cameras.id"), nullable=False)
+    is_connected = Column(Boolean, default=False)
+    last_ping_time = Column(DateTime)
+    response_time_ms = Column(Float)
     timestamp = Column(DateTime, default=datetime.utcnow, index=True)
+    
+    # Relationship with camera
+    camera = relationship("Camera", back_populates="statuses")
+
+class AlertType(Base):
+    __tablename__ = "alert_types"
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String, unique=True, nullable=False)  # NO_HELMET, NO_GLOVES, etc.
+    name = Column(String, nullable=False)
+    description = Column(String)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class CameraAlert(Base):
+    __tablename__ = "camera_alerts"
+    id = Column(Integer, primary_key=True, index=True)
+    camera_id = Column(Integer, ForeignKey("cameras.id"), nullable=False)
+    alert_type_code = Column(String, ForeignKey("alert_types.code"), nullable=False)
+    detection_timestamp = Column(DateTime, default=datetime.utcnow, index=True)
+    confidence_score = Column(Float)
+    alert_metadata = Column(JSON)  # Additional data like bounding boxes, etc.
+    resolved = Column(Boolean, default=False, index=True)
+    resolved_at = Column(DateTime)
+    resolved_by = Column(Integer, ForeignKey("users.id"))
+    
+    # Relationships
+    camera = relationship("Camera")
+    alert_type = relationship("AlertType")
+    resolved_by_user = relationship("User")
 
 # Criação do banco de dados e da tabela
 def init_database():
     Base.metadata.create_all(bind=engine)
+    create_default_alert_types()
+
+def create_default_alert_types():
+    """Create default alert types if they don't exist"""
+    db = SessionLocal()
+    try:
+        default_alerts = [
+            {"code": "NO_HELMET", "name": "No Helmet Detected", "description": "Person detected without safety helmet"},
+            {"code": "NO_GLOVES", "name": "No Gloves Detected", "description": "Person detected without safety gloves"},
+            {"code": "NO_SEAT_BELT", "name": "No Seat Belt", "description": "Driver detected without seat belt"},
+            {"code": "SMOKING", "name": "Smoking Detected", "description": "Person detected smoking"},
+            {"code": "USING_CELL_PHONE", "name": "Cell Phone Usage", "description": "Person detected using cell phone"},
+        ]
+        
+        for alert_data in default_alerts:
+            existing_alert = db.query(AlertType).filter(AlertType.code == alert_data["code"]).first()
+            if not existing_alert:
+                alert_type = AlertType(**alert_data)
+                db.add(alert_type)
+        
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"Error creating default alert types: {e}")
+    finally:
+        db.close()

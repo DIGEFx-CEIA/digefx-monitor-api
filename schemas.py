@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from pydantic import BaseModel
 
 
@@ -38,18 +38,87 @@ class HostStatusResponse(BaseModel):
     online:bool
     timestamp: str
 
-class CameraStatusResponse(BaseModel):
-    camera1_ip: Optional[str]
-    camera1_connected: bool
-    camera2_ip: Optional[str]
-    camera2_connected: bool
-    camera3_ip: Optional[str]
-    camera3_connected: bool
-    camera4_ip: Optional[str]
-    camera4_connected: bool
-    timestamp: str
-
 class StatusResponse(BaseModel):
     device_status: Optional[DeviceStatusResponse]
     host_status: Optional[HostStatusResponse]
-    camera_status: Optional[CameraStatusResponse]
+
+# Dynamic camera schemas
+class AlertTypeCreate(BaseModel):
+    code: str
+    name: str
+    description: Optional[str] = None
+
+class AlertTypeResponse(BaseModel):
+    id: int
+    code: str
+    name: str
+    description: Optional[str]
+    is_active: bool
+    created_at: str
+
+class CameraCreate(BaseModel):
+    name: str
+    ip_address: str
+    port: int = 80
+    enabled_alerts: List[str] = []  # List of alert type codes
+
+class CameraUpdate(BaseModel):
+    name: Optional[str] = None
+    ip_address: Optional[str] = None
+    port: Optional[int] = None
+    enabled_alerts: Optional[List[str]] = None
+    is_active: Optional[bool] = None
+
+class CameraResponse(BaseModel):
+    id: int
+    name: str
+    ip_address: str
+    port: int
+    enabled_alerts: List[str]
+    is_active: bool
+    created_at: str
+    updated_at: str
+
+class CameraStatusResponse(BaseModel):
+    camera_id: int
+    camera_name: str
+    camera_ip: str
+    camera_port: int
+    is_connected: bool
+    last_ping_time: Optional[str]
+    response_time_ms: Optional[float]
+    timestamp: str
+
+class CameraListResponse(BaseModel):
+    cameras: List[CameraResponse]
+    total_count: int
+
+class CameraStatusListResponse(BaseModel):
+    statuses: List[CameraStatusResponse]
+    total_count: int
+
+class CameraAlertCreate(BaseModel):
+    camera_id: int
+    alert_type_code: str
+    confidence_score: Optional[float] = None
+    alert_metadata: Optional[dict] = None
+
+class CameraAlertResponse(BaseModel):
+    id: int
+    camera_id: int
+    camera_name: str
+    alert_type_code: str
+    alert_type_name: str
+    detection_timestamp: str
+    confidence_score: Optional[float]
+    alert_metadata: Optional[dict]
+    resolved: bool
+    resolved_at: Optional[str]
+    resolved_by: Optional[int]
+
+class CameraAlertListResponse(BaseModel):
+    alerts: List[CameraAlertResponse]
+    total_count: int
+
+class AlertResolution(BaseModel):
+    resolved: bool = True

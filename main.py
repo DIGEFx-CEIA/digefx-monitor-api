@@ -9,13 +9,18 @@ from jose import JWTError, jwt
 from datetime import datetime, timedelta
 import requests
 from sqlalchemy.orm import Session
-from models import CameraStatus, DeviceLocation, HostStatus, User, SessionLocal, DeviceStatus, init_database
-from schemas import CameraStatusResponse, DeviceStatusResponse, HostStatusResponse, StatusResponse, LocationListResponse, DeviceLocationResponse
+from models import (DeviceLocation, HostStatus, User, SessionLocal, DeviceStatus, init_database,
+                   Camera, CameraStatus, AlertType, CameraAlert)
+from schemas import (DeviceStatusResponse, HostStatusResponse, StatusResponse, LocationListResponse, 
+                    DeviceLocationResponse, AlertTypeCreate, AlertTypeResponse, CameraCreate, CameraUpdate, 
+                    CameraResponse, CameraListResponse, CameraStatusResponse, CameraStatusListResponse,
+                    CameraAlertCreate, CameraAlertResponse, CameraAlertListResponse, AlertResolution)
 import serial
 import paho.mqtt.client as mqtt
 import threading
 import time
 from dotenv import load_dotenv
+from typing import List
 
 # MQTT Configuration
 MQTT_BROKER = "localhost"
@@ -249,34 +254,38 @@ def monitor_host():
         time.sleep(10)
 
 def monitor_cameras():
+    """Monitor all dynamic cameras connectivity"""
     while True:
         try:
-            camera1_host = os.getenv('CAMERA_1_HOST')
-            camera1_connected = is_connected(camera1_host,80)
-            camera2_host = os.getenv('CAMERA_2_HOST')
-            camera2_connected = is_connected(camera2_host,80)
-            camera3_host = os.getenv('CAMERA_3_HOST')
-            camera3_connected = is_connected(camera3_host,80)
-            camera4_host = os.getenv('CAMERA_4_HOST')
-            camera4_connected = is_connected(camera4_host,80)
-            # Save camera status to database
             db = SessionLocal()
-            camera_status = CameraStatus(
-                camera1_ip=camera1_host,
-                camera1_connected=camera1_connected,
-                camera2_ip=camera2_host,
-                camera2_connected=camera2_connected,
-                camera3_ip=camera3_host,
-                camera3_connected=camera3_connected,
-                camera4_ip=camera4_host,
-                camera4_connected=camera4_connected,
-                timestamp=datetime.utcnow(),
-            )
-            db.add(camera_status)
+            
+            # Get all active cameras from database
+            cameras = db.query(Camera).filter(Camera.is_active == True).all()
+            
+            # Monitor each camera dynamically
+            for camera in cameras:
+                start_time = time.time()
+                camera_connected = is_connected(camera.ip_address, camera.port)
+                response_time = (time.time() - start_time) * 1000  # Convert to milliseconds
+                
+                # Save camera status to database
+                camera_status = CameraStatus(
+                    camera_id=camera.id,
+                    is_connected=camera_connected,
+                    last_ping_time=datetime.utcnow() if camera_connected else None,
+                    response_time_ms=response_time if camera_connected else None,
+                    timestamp=datetime.utcnow(),
+                )
+                db.add(camera_status)
+            
             db.commit()
             db.close()
+            
         except Exception as e:
-            print(f"[CAMERA MONITOR] Erro: {e}")
+            print(f"[CAMERA MONITOR] Error: {e}")
+            if 'db' in locals():
+                db.rollback()
+                db.close()
 
         time.sleep(10)
 
@@ -326,7 +335,6 @@ def configure(config: SerialConfig, current_user: User = Depends(get_current_use
 def get_device_status(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     device_status = db.query(DeviceStatus).order_by(DeviceStatus.timestamp.desc()).first()
     host_status = db.query(HostStatus).order_by(HostStatus.timestamp.desc()).first()
-    camera_status = db.query(CameraStatus).order_by(CameraStatus.timestamp.desc()).first()
     if not device_status and not host_status:
         raise HTTPException(status_code=404, detail="No status available")
 
@@ -352,18 +360,7 @@ def get_device_status(current_user: User = Depends(get_current_user), db: Sessio
             temperature=host_status.temperature,
             online=host_status.online,
             timestamp=host_status.timestamp.strftime("%Y-%m-%d %H:%M:%S GMT")
-        ) if host_status else None,
-        "camera_status": CameraStatusResponse(
-            camera1_ip=camera_status.camera1_ip,
-            camera1_connected=camera_status.camera1_connected,
-            camera2_ip=camera_status.camera2_ip,
-            camera2_connected=camera_status.camera2_connected,
-            camera3_ip=camera_status.camera3_ip,
-            camera3_connected=camera_status.camera3_connected,
-            camera4_ip=camera_status.camera4_ip,
-            camera4_connected=camera_status.camera4_connected,
-            timestamp=camera_status.timestamp.strftime("%Y-%m-%d %H:%M:%S GMT")
-        ) if camera_status else None
+        ) if host_status else None
     }
 
 # Protected route to fetch device locations for current day
@@ -398,4 +395,327 @@ def get_today_locations(current_user: User = Depends(get_current_user), db: Sess
     return LocationListResponse(
         locations=location_responses,
         total_count=len(location_responses)
+    )
+
+# Alert Types Management
+@app.get("/alert-types", response_model=List[AlertTypeResponse])
+def get_alert_types(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Get all available alert types"""
+    alert_types = db.query(AlertType).filter(AlertType.is_active == True).all()
+    return [
+        AlertTypeResponse(
+            id=alert.id,
+            code=alert.code,
+            name=alert.name,
+            description=alert.description,
+            is_active=alert.is_active,
+            created_at=alert.created_at.strftime("%Y-%m-%d %H:%M:%S GMT")
+        ) for alert in alert_types
+    ]
+
+@app.post("/alert-types", response_model=AlertTypeResponse)
+def create_alert_type(alert_type: AlertTypeCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Create a new alert type"""
+    # Check if alert type already exists
+    existing_alert = db.query(AlertType).filter(AlertType.code == alert_type.code).first()
+    if existing_alert:
+        raise HTTPException(status_code=400, detail="Alert type with this code already exists")
+    
+    new_alert = AlertType(
+        code=alert_type.code,
+        name=alert_type.name,
+        description=alert_type.description,
+        created_at=datetime.utcnow()
+    )
+    db.add(new_alert)
+    db.commit()
+    db.refresh(new_alert)
+    
+    return AlertTypeResponse(
+        id=new_alert.id,
+        code=new_alert.code,
+        name=new_alert.name,
+        description=new_alert.description,
+        is_active=new_alert.is_active,
+        created_at=new_alert.created_at.strftime("%Y-%m-%d %H:%M:%S GMT")
+    )
+
+# Camera Management
+@app.get("/cameras", response_model=CameraListResponse)
+def get_cameras(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Get all cameras"""
+    cameras = db.query(Camera).all()
+    camera_responses = [
+        CameraResponse(
+            id=camera.id,
+            name=camera.name,
+            ip_address=camera.ip_address,
+            port=camera.port,
+            enabled_alerts=camera.enabled_alerts or [],
+            is_active=camera.is_active,
+            created_at=camera.created_at.strftime("%Y-%m-%d %H:%M:%S GMT"),
+            updated_at=camera.updated_at.strftime("%Y-%m-%d %H:%M:%S GMT")
+        ) for camera in cameras
+    ]
+    
+    return CameraListResponse(cameras=camera_responses, total_count=len(camera_responses))
+
+@app.post("/cameras", response_model=CameraResponse)
+def create_camera(camera: CameraCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Create a new camera"""
+    # Check if camera name already exists
+    existing_camera = db.query(Camera).filter(Camera.name == camera.name).first()
+    if existing_camera:
+        raise HTTPException(status_code=400, detail="Camera with this name already exists")
+    
+    # Validate alert types
+    if camera.enabled_alerts:
+        valid_alerts = db.query(AlertType).filter(AlertType.code.in_(camera.enabled_alerts)).all()
+        if len(valid_alerts) != len(camera.enabled_alerts):
+            raise HTTPException(status_code=400, detail="Some alert types are invalid")
+    
+    new_camera = Camera(
+        name=camera.name,
+        ip_address=camera.ip_address,
+        port=camera.port,
+        enabled_alerts=camera.enabled_alerts,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow()
+    )
+    db.add(new_camera)
+    db.commit()
+    db.refresh(new_camera)
+    
+    return CameraResponse(
+        id=new_camera.id,
+        name=new_camera.name,
+        ip_address=new_camera.ip_address,
+        port=new_camera.port,
+        enabled_alerts=new_camera.enabled_alerts or [],
+        is_active=new_camera.is_active,
+        created_at=new_camera.created_at.strftime("%Y-%m-%d %H:%M:%S GMT"),
+        updated_at=new_camera.updated_at.strftime("%Y-%m-%d %H:%M:%S GMT")
+    )
+
+@app.get("/cameras/{camera_id}", response_model=CameraResponse)
+def get_camera(camera_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Get a specific camera"""
+    camera = db.query(Camera).filter(Camera.id == camera_id).first()
+    if not camera:
+        raise HTTPException(status_code=404, detail="Camera not found")
+    
+    return CameraResponse(
+        id=camera.id,
+        name=camera.name,
+        ip_address=camera.ip_address,
+        port=camera.port,
+        enabled_alerts=camera.enabled_alerts or [],
+        is_active=camera.is_active,
+        created_at=camera.created_at.strftime("%Y-%m-%d %H:%M:%S GMT"),
+        updated_at=camera.updated_at.strftime("%Y-%m-%d %H:%M:%S GMT")
+    )
+
+@app.put("/cameras/{camera_id}", response_model=CameraResponse)
+def update_camera(camera_id: int, camera_update: CameraUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Update a camera"""
+    camera = db.query(Camera).filter(Camera.id == camera_id).first()
+    if not camera:
+        raise HTTPException(status_code=404, detail="Camera not found")
+    
+    # Check for name conflicts if name is being updated
+    if camera_update.name and camera_update.name != camera.name:
+        existing_camera = db.query(Camera).filter(Camera.name == camera_update.name).first()
+        if existing_camera:
+            raise HTTPException(status_code=400, detail="Camera with this name already exists")
+    
+    # Validate alert types if being updated
+    if camera_update.enabled_alerts is not None:
+        valid_alerts = db.query(AlertType).filter(AlertType.code.in_(camera_update.enabled_alerts)).all()
+        if len(valid_alerts) != len(camera_update.enabled_alerts):
+            raise HTTPException(status_code=400, detail="Some alert types are invalid")
+    
+    # Update camera fields
+    update_data = camera_update.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(camera, field, value)
+    
+    camera.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(camera)
+    
+    return CameraResponse(
+        id=camera.id,
+        name=camera.name,
+        ip_address=camera.ip_address,
+        port=camera.port,
+        enabled_alerts=camera.enabled_alerts or [],
+        is_active=camera.is_active,
+        created_at=camera.created_at.strftime("%Y-%m-%d %H:%M:%S GMT"),
+        updated_at=camera.updated_at.strftime("%Y-%m-%d %H:%M:%S GMT")
+    )
+
+@app.delete("/cameras/{camera_id}")
+def delete_camera(camera_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Delete a camera"""
+    camera = db.query(Camera).filter(Camera.id == camera_id).first()
+    if not camera:
+        raise HTTPException(status_code=404, detail="Camera not found")
+    
+    db.delete(camera)
+    db.commit()
+    return {"message": "Camera deleted successfully"}
+
+# Camera Status Monitoring
+@app.get("/cameras/status", response_model=CameraStatusListResponse)
+def get_cameras_status(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Get latest status for all cameras"""
+    # Get the latest status for each camera
+    subquery = db.query(
+        CameraStatus.camera_id,
+        db.func.max(CameraStatus.timestamp).label('latest_timestamp')
+    ).group_by(CameraStatus.camera_id).subquery()
+    
+    latest_statuses = db.query(CameraStatus).join(
+        subquery,
+        db.and_(
+            CameraStatus.camera_id == subquery.c.camera_id,
+            CameraStatus.timestamp == subquery.c.latest_timestamp
+        )
+    ).all()
+    
+    status_responses = []
+    for status in latest_statuses:
+        camera = db.query(Camera).filter(Camera.id == status.camera_id).first()
+        if camera:
+            status_responses.append(CameraStatusResponse(
+                camera_id=camera.id,
+                camera_name=camera.name,
+                camera_ip=camera.ip_address,
+                camera_port=camera.port,
+                is_connected=status.is_connected,
+                last_ping_time=status.last_ping_time.strftime("%Y-%m-%d %H:%M:%S GMT") if status.last_ping_time else None,
+                response_time_ms=status.response_time_ms,
+                timestamp=status.timestamp.strftime("%Y-%m-%d %H:%M:%S GMT")
+            ))
+    
+    return CameraStatusListResponse(statuses=status_responses, total_count=len(status_responses))
+
+# Camera Alerts Management
+@app.post("/camera-alerts", response_model=CameraAlertResponse)
+def create_camera_alert(alert: CameraAlertCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Create a new camera alert (typically called by AI detection system)"""
+    # Validate camera exists
+    camera = db.query(Camera).filter(Camera.id == alert.camera_id).first()
+    if not camera:
+        raise HTTPException(status_code=404, detail="Camera not found")
+    
+    # Validate alert type exists
+    alert_type = db.query(AlertType).filter(AlertType.code == alert.alert_type_code).first()
+    if not alert_type:
+        raise HTTPException(status_code=404, detail="Alert type not found")
+    
+    # Check if alert type is enabled for this camera
+    if alert.alert_type_code not in (camera.enabled_alerts or []):
+        raise HTTPException(status_code=400, detail="Alert type not enabled for this camera")
+    
+    new_alert = CameraAlert(
+        camera_id=alert.camera_id,
+        alert_type_code=alert.alert_type_code,
+        detection_timestamp=datetime.utcnow(),
+        confidence_score=alert.confidence_score,
+        alert_metadata=alert.alert_metadata
+    )
+    db.add(new_alert)
+    db.commit()
+    db.refresh(new_alert)
+    
+    return CameraAlertResponse(
+        id=new_alert.id,
+        camera_id=new_alert.camera_id,
+        camera_name=camera.name,
+        alert_type_code=new_alert.alert_type_code,
+        alert_type_name=alert_type.name,
+        detection_timestamp=new_alert.detection_timestamp.strftime("%Y-%m-%d %H:%M:%S GMT"),
+        confidence_score=new_alert.confidence_score,
+        metadata=new_alert.alert_metadata,
+        resolved=new_alert.resolved,
+        resolved_at=new_alert.resolved_at.strftime("%Y-%m-%d %H:%M:%S GMT") if new_alert.resolved_at else None,
+        resolved_by=new_alert.resolved_by
+    )
+
+@app.get("/camera-alerts", response_model=CameraAlertListResponse)
+def get_camera_alerts(
+    camera_id: int = None,
+    alert_type: str = None,
+    resolved: bool = None,
+    limit: int = 100,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get camera alerts with optional filters"""
+    query = db.query(CameraAlert)
+    
+    if camera_id:
+        query = query.filter(CameraAlert.camera_id == camera_id)
+    if alert_type:
+        query = query.filter(CameraAlert.alert_type_code == alert_type)
+    if resolved is not None:
+        query = query.filter(CameraAlert.resolved == resolved)
+    
+    alerts = query.order_by(CameraAlert.detection_timestamp.desc()).limit(limit).all()
+    
+    alert_responses = []
+    for alert in alerts:
+        camera = db.query(Camera).filter(Camera.id == alert.camera_id).first()
+        alert_type_obj = db.query(AlertType).filter(AlertType.code == alert.alert_type_code).first()
+        
+        alert_responses.append(CameraAlertResponse(
+            id=alert.id,
+            camera_id=alert.camera_id,
+            camera_name=camera.name if camera else "Unknown",
+            alert_type_code=alert.alert_type_code,
+            alert_type_name=alert_type_obj.name if alert_type_obj else "Unknown",
+            detection_timestamp=alert.detection_timestamp.strftime("%Y-%m-%d %H:%M:%S GMT"),
+            confidence_score=alert.confidence_score,
+            metadata=alert.alert_metadata,
+            resolved=alert.resolved,
+            resolved_at=alert.resolved_at.strftime("%Y-%m-%d %H:%M:%S GMT") if alert.resolved_at else None,
+            resolved_by=alert.resolved_by
+        ))
+    
+    return CameraAlertListResponse(alerts=alert_responses, total_count=len(alert_responses))
+
+@app.put("/camera-alerts/{alert_id}/resolve", response_model=CameraAlertResponse)
+def resolve_camera_alert(alert_id: int, resolution: AlertResolution, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Resolve or unresolve a camera alert"""
+    alert = db.query(CameraAlert).filter(CameraAlert.id == alert_id).first()
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    
+    alert.resolved = resolution.resolved
+    if resolution.resolved:
+        alert.resolved_at = datetime.utcnow()
+        alert.resolved_by = current_user.id
+    else:
+        alert.resolved_at = None
+        alert.resolved_by = None
+    
+    db.commit()
+    db.refresh(alert)
+    
+    camera = db.query(Camera).filter(Camera.id == alert.camera_id).first()
+    alert_type = db.query(AlertType).filter(AlertType.code == alert.alert_type_code).first()
+    
+    return CameraAlertResponse(
+        id=alert.id,
+        camera_id=alert.camera_id,
+        camera_name=camera.name if camera else "Unknown",
+        alert_type_code=alert.alert_type_code,
+        alert_type_name=alert_type.name if alert_type else "Unknown",
+        detection_timestamp=alert.detection_timestamp.strftime("%Y-%m-%d %H:%M:%S GMT"),
+        confidence_score=alert.confidence_score,
+        metadata=alert.alert_metadata,
+        resolved=alert.resolved,
+        resolved_at=alert.resolved_at.strftime("%Y-%m-%d %H:%M:%S GMT") if alert.resolved_at else None,
+        resolved_by=alert.resolved_by
     )
