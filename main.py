@@ -9,7 +9,7 @@ from jose import JWTError, jwt
 from datetime import datetime, timedelta
 import requests
 from sqlalchemy.orm import Session
-from models import CameraStatus, DeviceLocation, HostStatus, User, SessionLocal, DeviceStatus
+from models import CameraStatus, DeviceLocation, HostStatus, User, SessionLocal, DeviceStatus, init_database
 from schemas import CameraStatusResponse, DeviceStatusResponse, HostStatusResponse, StatusResponse, LocationListResponse, DeviceLocationResponse
 import serial
 import paho.mqtt.client as mqtt
@@ -27,7 +27,9 @@ MQTT_TOPIC = "device/status"
 
 # App configuration
 app = FastAPI()
+
 load_dotenv()
+init_database()
 
 # JWT configuration
 SECRET_KEY = "digefxsecretkey"

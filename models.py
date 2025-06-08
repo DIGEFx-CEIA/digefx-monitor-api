@@ -4,7 +4,7 @@ from datetime import datetime
 from sqlalchemy.orm import sessionmaker
 
 # Conexão com o SQLite
-DATABASE_URL = "sqlite:///./database.db"
+DATABASE_URL = "sqlite:///./data/app.db"
 
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -69,4 +69,5 @@ class CameraStatus(Base):
     timestamp = Column(DateTime, default=datetime.utcnow, index=True)
 
 # Criação do banco de dados e da tabela
-Base.metadata.create_all(bind=engine)
+def init_database():
+    Base.metadata.create_all(bind=engine)

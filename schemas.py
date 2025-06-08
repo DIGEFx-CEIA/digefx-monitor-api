@@ -5,23 +5,23 @@ from pydantic import BaseModel
 
 class DeviceStatusResponse(BaseModel):
     device_id: str
-    ignition: str
-    battery_voltage: float
-    min_voltage: float
-    relay1_status: str
-    relay2_status: str
-    relay1_time: float
-    relay2_time: float
-    gps_status: str
+    ignition: Optional[str]
+    battery_voltage: Optional[float]
+    min_voltage: Optional[float]
+    relay1_status: Optional[str]
+    relay2_status: Optional[str]
+    relay1_time: Optional[float]
+    relay2_time: Optional[float]
+    gps_status: Optional[str]
     timestamp: str
 
 class DeviceLocationResponse(BaseModel):
     device_id: str
-    latitude: float
-    longitude: float
-    speed: float
-    hdop: float
-    sats: int
+    latitude: Optional[float]
+    longitude: Optional[float]
+    speed: Optional[float]
+    hdop: Optional[float]
+    sats: Optional[int]
     timestamp: str
 
 class LocationListResponse(BaseModel):
@@ -29,11 +29,11 @@ class LocationListResponse(BaseModel):
     total_count: int
 
 class HostStatusResponse(BaseModel):
-    host_ip: str
-    public_ip: str
-    cpu_usage: float
-    ram_usage: float
-    disk_usage: float
+    host_ip: Optional[str]
+    public_ip: Optional[str]
+    cpu_usage: Optional[float]
+    ram_usage: Optional[float]
+    disk_usage: Optional[float]
     temperature: Optional[float] = None
     online:bool
     timestamp: str
