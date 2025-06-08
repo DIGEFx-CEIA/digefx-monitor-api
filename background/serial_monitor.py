@@ -54,7 +54,9 @@ def process_serial_data(data):
     db = SessionLocal()
     try:
         db.add(device_status)
-        db.add(device_location)
+        # Just save the location if it's valid
+        if device_location.latitude != 0 and device_location.longitude != 0:
+            db.add(device_location)
         db.commit()
     finally:
         db.close()
