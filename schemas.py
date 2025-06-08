@@ -42,20 +42,28 @@ class StatusResponse(BaseModel):
     device_status: Optional[DeviceStatusResponse]
     host_status: Optional[HostStatusResponse]
 
-# Dynamic camera schemas
+# Alert Type schemas
 class AlertTypeCreate(BaseModel):
     code: str
     name: str
     description: Optional[str] = None
+    severity: str = "medium"  # low, medium, high, critical
 
 class AlertTypeResponse(BaseModel):
     id: int
     code: str
     name: str
     description: Optional[str]
+    severity: str
     is_active: bool
     created_at: str
+    updated_at: str
 
+class AlertTypeListResponse(BaseModel):
+    alert_types: List[AlertTypeResponse]
+    total_count: int
+
+# Camera schemas
 class CameraCreate(BaseModel):
     name: str
     ip_address: str
@@ -97,24 +105,27 @@ class CameraStatusListResponse(BaseModel):
     statuses: List[CameraStatusResponse]
     total_count: int
 
+# Camera Alert schemas
 class CameraAlertCreate(BaseModel):
     camera_id: int
-    alert_type_code: str
-    confidence_score: Optional[float] = None
-    alert_metadata: Optional[dict] = None
+    alert_type_id: int
+    message: str
+    severity: str = "medium"  # low, medium, high, critical
 
 class CameraAlertResponse(BaseModel):
     id: int
     camera_id: int
     camera_name: str
-    alert_type_code: str
+    alert_type_id: int
     alert_type_name: str
-    detection_timestamp: str
-    confidence_score: Optional[float]
-    alert_metadata: Optional[dict]
-    resolved: bool
+    alert_type_code: str
+    message: str
+    severity: str
+    is_resolved: bool
+    triggered_at: str
     resolved_at: Optional[str]
-    resolved_by: Optional[int]
+    created_at: str
+    updated_at: str
 
 class CameraAlertListResponse(BaseModel):
     alerts: List[CameraAlertResponse]

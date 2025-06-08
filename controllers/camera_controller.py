@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, and_
 from typing import List
 
-from services.auth_service import get_current_user, get_db
+from config.security import security, get_current_user
+from config.database_config import get_database
 from models import Camera, CameraStatus, AlertType, User
 from schemas import (CameraCreate, CameraUpdate, CameraResponse, CameraListResponse, 
                     CameraStatusResponse, CameraStatusListResponse, AlertTypeCreate, 
@@ -16,8 +17,8 @@ from schemas import (CameraCreate, CameraUpdate, CameraResponse, CameraListRespo
 router = APIRouter(prefix="/cameras")
 
 
-@router.get("", response_model=CameraListResponse)
-def get_cameras(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+@router.get("", response_model=CameraListResponse, dependencies=[Depends(security)])
+def get_cameras(current_user: User = Depends(get_current_user), db: Session = Depends(get_database)):
     """Obter todas as câmeras"""
     cameras = db.query(Camera).all()
     camera_responses = [
@@ -36,8 +37,8 @@ def get_cameras(current_user: User = Depends(get_current_user), db: Session = De
     return CameraListResponse(cameras=camera_responses, total_count=len(camera_responses))
 
 
-@router.get("/status", response_model=CameraStatusListResponse)
-def get_cameras_status(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+@router.get("/status", response_model=CameraStatusListResponse, dependencies=[Depends(security)])
+def get_cameras_status(current_user: User = Depends(get_current_user), db: Session = Depends(get_database)):
     """Obter status mais recente de todas as câmeras"""
     # Get the latest status for each camera
     subquery = db.query(
@@ -71,8 +72,8 @@ def get_cameras_status(current_user: User = Depends(get_current_user), db: Sessi
     return CameraStatusListResponse(statuses=status_responses, total_count=len(status_responses))
 
 
-@router.post("", response_model=CameraResponse)
-def create_camera(camera: CameraCreate, db: Session = Depends(get_db)):
+@router.post("", response_model=CameraResponse, dependencies=[Depends(security)])
+def create_camera(camera: CameraCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_database)):
     """Criar uma nova câmera"""
     # Check if camera name already exists
     existing_camera = db.query(Camera).filter(Camera.name == camera.name).first()
@@ -109,8 +110,8 @@ def create_camera(camera: CameraCreate, db: Session = Depends(get_db)):
     )
 
 
-@router.get("/{camera_id}", response_model=CameraResponse)
-def get_camera(camera_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+@router.get("/{camera_id}", response_model=CameraResponse, dependencies=[Depends(security)])
+def get_camera(camera_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_database)):
     """Obter uma câmera específica"""
     camera = db.query(Camera).filter(Camera.id == camera_id).first()
     if not camera:
@@ -128,8 +129,8 @@ def get_camera(camera_id: int, current_user: User = Depends(get_current_user), d
     )
 
 
-@router.put("/{camera_id}", response_model=CameraResponse)
-def update_camera(camera_id: int, camera_update: CameraUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+@router.put("/{camera_id}", response_model=CameraResponse, dependencies=[Depends(security)])
+def update_camera(camera_id: int, camera_update: CameraUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_database)):
     """Atualizar uma câmera"""
     camera = db.query(Camera).filter(Camera.id == camera_id).first()
     if not camera:
@@ -168,8 +169,8 @@ def update_camera(camera_id: int, camera_update: CameraUpdate, current_user: Use
     )
 
 
-@router.delete("/{camera_id}")
-def delete_camera(camera_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+@router.delete("/{camera_id}", dependencies=[Depends(security)])
+def delete_camera(camera_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_database)):
     """Deletar uma câmera"""
     camera = db.query(Camera).filter(Camera.id == camera_id).first()
     if not camera:

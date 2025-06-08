@@ -4,65 +4,73 @@ Controller de gerenciamento de alertas
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 
-from services.auth_service import get_current_user, get_db
+from config.security import security, get_current_user
+from config.database_config import get_database
 from models import AlertType, CameraAlert, Camera, User
-from schemas import (AlertTypeCreate, AlertTypeResponse, CameraAlertCreate, 
-                    CameraAlertResponse, CameraAlertListResponse, AlertResolution)
+from schemas import (AlertTypeCreate, AlertTypeResponse, AlertTypeListResponse,
+                    CameraAlertCreate, CameraAlertResponse, CameraAlertListResponse)
 
-router = APIRouter()
+router = APIRouter(prefix="/alerts")
 
 
-# Alert Types Management
-@router.get("/alert-types", response_model=List[AlertTypeResponse])
-def get_alert_types(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Obter todos os tipos de alerta disponíveis"""
-    alert_types = db.query(AlertType).filter(AlertType.is_active == True).all()
-    return [
+@router.get("/types", response_model=AlertTypeListResponse, dependencies=[Depends(security)])
+def get_alert_types(current_user: User = Depends(get_current_user), db: Session = Depends(get_database)):
+    """Obter todos os tipos de alerta"""
+    alert_types = db.query(AlertType).all()
+    
+    type_responses = [
         AlertTypeResponse(
-            id=alert.id,
-            code=alert.code,
-            name=alert.name,
-            description=alert.description,
-            is_active=alert.is_active,
-            created_at=alert.created_at.strftime("%Y-%m-%d %H:%M:%S GMT")
-        ) for alert in alert_types
+            id=alert_type.id,
+            code=alert_type.code,
+            name=alert_type.name,
+            description=alert_type.description or "",
+            color=alert_type.color or "#000000",
+            is_active=alert_type.is_active,
+            created_at=alert_type.created_at.strftime("%Y-%m-%d %H:%M:%S GMT") if alert_type.created_at else "",
+            updated_at=alert_type.updated_at.strftime("%Y-%m-%d %H:%M:%S GMT") if alert_type.updated_at else ""
+        ) for alert_type in alert_types
     ]
+    
+    return AlertTypeListResponse(alert_types=type_responses, total_count=len(type_responses))
 
 
-@router.post("/alert-types", response_model=AlertTypeResponse)
-def create_alert_type(alert_type: AlertTypeCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+@router.post("/types", response_model=AlertTypeResponse, dependencies=[Depends(security)])
+def create_alert_type(alert_type: AlertTypeCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_database)):
     """Criar um novo tipo de alerta"""
-    # Check if alert type already exists
-    existing_alert = db.query(AlertType).filter(AlertType.code == alert_type.code).first()
-    if existing_alert:
+    # Check if code already exists
+    existing_type = db.query(AlertType).filter(AlertType.code == alert_type.code).first()
+    if existing_type:
         raise HTTPException(status_code=400, detail="Alert type with this code already exists")
     
-    new_alert = AlertType(
+    new_alert_type = AlertType(
         code=alert_type.code,
         name=alert_type.name,
         description=alert_type.description,
-        created_at=datetime.utcnow()
+        color=alert_type.color,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow()
     )
-    db.add(new_alert)
+    db.add(new_alert_type)
     db.commit()
-    db.refresh(new_alert)
+    db.refresh(new_alert_type)
     
     return AlertTypeResponse(
-        id=new_alert.id,
-        code=new_alert.code,
-        name=new_alert.name,
-        description=new_alert.description,
-        is_active=new_alert.is_active,
-        created_at=new_alert.created_at.strftime("%Y-%m-%d %H:%M:%S GMT")
+        id=new_alert_type.id,
+        code=new_alert_type.code,
+        name=new_alert_type.name,
+        description=new_alert_type.description or "",
+        color=new_alert_type.color or "#000000",
+        is_active=new_alert_type.is_active,
+        created_at=new_alert_type.created_at.strftime("%Y-%m-%d %H:%M:%S GMT"),
+        updated_at=new_alert_type.updated_at.strftime("%Y-%m-%d %H:%M:%S GMT")
     )
 
 
-# Camera Alerts Management
-@router.post("/camera-alerts", response_model=CameraAlertResponse)
-def create_camera_alert(alert: CameraAlertCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Criar um novo alerta de câmera (tipicamente chamado pelo sistema de detecção de IA)"""
+@router.post("/cameras", response_model=CameraAlertResponse, dependencies=[Depends(security)])
+def create_camera_alert(alert: CameraAlertCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_database)):
+    """Criar um alerta de câmera"""
     # Validate camera exists
     camera = db.query(Camera).filter(Camera.id == alert.camera_id).first()
     if not camera:
@@ -73,16 +81,13 @@ def create_camera_alert(alert: CameraAlertCreate, current_user: User = Depends(g
     if not alert_type:
         raise HTTPException(status_code=404, detail="Alert type not found")
     
-    # Check if alert type is enabled for this camera
-    if alert.alert_type_code not in (camera.enabled_alerts or []):
-        raise HTTPException(status_code=400, detail="Alert type not enabled for this camera")
-    
     new_alert = CameraAlert(
         camera_id=alert.camera_id,
         alert_type_code=alert.alert_type_code,
-        detection_timestamp=datetime.utcnow(),
-        confidence_score=alert.confidence_score,
-        alert_metadata=alert.alert_metadata
+        message=alert.message,
+        severity=alert.severity,
+        timestamp=datetime.utcnow(),
+        created_at=datetime.utcnow()
     )
     db.add(new_alert)
     db.commit()
@@ -94,72 +99,72 @@ def create_camera_alert(alert: CameraAlertCreate, current_user: User = Depends(g
         camera_name=camera.name,
         alert_type_code=new_alert.alert_type_code,
         alert_type_name=alert_type.name,
-        detection_timestamp=new_alert.detection_timestamp.strftime("%Y-%m-%d %H:%M:%S GMT"),
-        confidence_score=new_alert.confidence_score,
-        metadata=new_alert.alert_metadata,
-        resolved=new_alert.resolved,
+        message=new_alert.message,
+        severity=new_alert.severity,
+        is_resolved=new_alert.is_resolved,
         resolved_at=new_alert.resolved_at.strftime("%Y-%m-%d %H:%M:%S GMT") if new_alert.resolved_at else None,
-        resolved_by=new_alert.resolved_by
+        resolved_by=new_alert.resolved_by,
+        timestamp=new_alert.timestamp.strftime("%Y-%m-%d %H:%M:%S GMT"),
+        created_at=new_alert.created_at.strftime("%Y-%m-%d %H:%M:%S GMT")
     )
 
 
-@router.get("/camera-alerts", response_model=CameraAlertListResponse)
+@router.get("/cameras", response_model=CameraAlertListResponse, dependencies=[Depends(security)])
 def get_camera_alerts(
-    camera_id: int = None,
-    alert_type: str = None,
-    resolved: bool = None,
-    limit: int = 100,
+    camera_id: Optional[int] = None,
+    alert_type_code: Optional[str] = None,
+    is_resolved: Optional[bool] = None,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_database)
 ):
     """Obter alertas de câmera com filtros opcionais"""
     query = db.query(CameraAlert)
     
     if camera_id:
         query = query.filter(CameraAlert.camera_id == camera_id)
-    if alert_type:
-        query = query.filter(CameraAlert.alert_type_code == alert_type)
-    if resolved is not None:
-        query = query.filter(CameraAlert.resolved == resolved)
+    if alert_type_code:
+        query = query.filter(CameraAlert.alert_type_code == alert_type_code)
+    if is_resolved is not None:
+        query = query.filter(CameraAlert.is_resolved == is_resolved)
     
-    alerts = query.order_by(CameraAlert.detection_timestamp.desc()).limit(limit).all()
+    alerts = query.order_by(CameraAlert.timestamp.desc()).all()
     
     alert_responses = []
     for alert in alerts:
         camera = db.query(Camera).filter(Camera.id == alert.camera_id).first()
-        alert_type_obj = db.query(AlertType).filter(AlertType.code == alert.alert_type_code).first()
+        alert_type = db.query(AlertType).filter(AlertType.code == alert.alert_type_code).first()
         
         alert_responses.append(CameraAlertResponse(
             id=alert.id,
             camera_id=alert.camera_id,
             camera_name=camera.name if camera else "Unknown",
             alert_type_code=alert.alert_type_code,
-            alert_type_name=alert_type_obj.name if alert_type_obj else "Unknown",
-            detection_timestamp=alert.detection_timestamp.strftime("%Y-%m-%d %H:%M:%S GMT"),
-            confidence_score=alert.confidence_score,
-            metadata=alert.alert_metadata,
-            resolved=alert.resolved,
+            alert_type_name=alert_type.name if alert_type else "Unknown",
+            message=alert.message,
+            severity=alert.severity,
+            is_resolved=alert.is_resolved,
             resolved_at=alert.resolved_at.strftime("%Y-%m-%d %H:%M:%S GMT") if alert.resolved_at else None,
-            resolved_by=alert.resolved_by
+            resolved_by=alert.resolved_by,
+            timestamp=alert.timestamp.strftime("%Y-%m-%d %H:%M:%S GMT"),
+            created_at=alert.created_at.strftime("%Y-%m-%d %H:%M:%S GMT")
         ))
     
     return CameraAlertListResponse(alerts=alert_responses, total_count=len(alert_responses))
 
 
-@router.put("/camera-alerts/{alert_id}/resolve", response_model=CameraAlertResponse)
-def resolve_camera_alert(alert_id: int, resolution: AlertResolution, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Resolver ou desresolver um alerta de câmera"""
+@router.put("/cameras/{alert_id}/resolve", response_model=CameraAlertResponse, dependencies=[Depends(security)])
+def resolve_camera_alert(alert_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_database)):
+    """Resolver um alerta de câmera"""
     alert = db.query(CameraAlert).filter(CameraAlert.id == alert_id).first()
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
     
-    alert.resolved = resolution.resolved
-    if resolution.resolved:
-        alert.resolved_at = datetime.utcnow()
-        alert.resolved_by = current_user.id
-    else:
-        alert.resolved_at = None
-        alert.resolved_by = None
+    if alert.is_resolved:
+        raise HTTPException(status_code=400, detail="Alert is already resolved")
+    
+    alert.is_resolved = True
+    alert.resolved_at = datetime.utcnow()
+    alert.resolved_by = current_user.username
     
     db.commit()
     db.refresh(alert)
@@ -173,10 +178,11 @@ def resolve_camera_alert(alert_id: int, resolution: AlertResolution, current_use
         camera_name=camera.name if camera else "Unknown",
         alert_type_code=alert.alert_type_code,
         alert_type_name=alert_type.name if alert_type else "Unknown",
-        detection_timestamp=alert.detection_timestamp.strftime("%Y-%m-%d %H:%M:%S GMT"),
-        confidence_score=alert.confidence_score,
-        metadata=alert.alert_metadata,
-        resolved=alert.resolved,
+        message=alert.message,
+        severity=alert.severity,
+        is_resolved=alert.is_resolved,
         resolved_at=alert.resolved_at.strftime("%Y-%m-%d %H:%M:%S GMT") if alert.resolved_at else None,
-        resolved_by=alert.resolved_by
+        resolved_by=alert.resolved_by,
+        timestamp=alert.timestamp.strftime("%Y-%m-%d %H:%M:%S GMT"),
+        created_at=alert.created_at.strftime("%Y-%m-%d %H:%M:%S GMT")
     ) 

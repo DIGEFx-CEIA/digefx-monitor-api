@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
 
-from services.auth_service import get_current_user, get_db
+from config.security import security, get_current_user
+from config.database_config import get_database
 from services.network_service import get_public_ip
 from models import DeviceStatus, HostStatus, DeviceLocation, User
 from schemas import StatusResponse, DeviceStatusResponse, HostStatusResponse, LocationListResponse, DeviceLocationResponse
@@ -43,7 +44,7 @@ def initialize_serial():
 ser = initialize_serial()
 
 
-@router.post("/configure")
+@router.post("/configure", dependencies=[Depends(security)])
 def configure(config: SerialConfig, current_user: User = Depends(get_current_user)):
     """Rota de configuração serial (protegida)"""
     config_dict = config.model_dump(exclude_unset=True, exclude_none=True)
@@ -56,8 +57,8 @@ def configure(config: SerialConfig, current_user: User = Depends(get_current_use
     return {"status": "Configuration sent", **config_dict}
 
 
-@router.get("/status", response_model=StatusResponse)
-def get_device_status(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+@router.get("/status", response_model=StatusResponse, dependencies=[Depends(security)])
+def get_device_status(current_user: User = Depends(get_current_user), db: Session = Depends(get_database)):
     """Rota protegida para buscar status atual do dispositivo"""
     device_status = db.query(DeviceStatus).order_by(DeviceStatus.timestamp.desc()).first()
     host_status = db.query(HostStatus).order_by(HostStatus.timestamp.desc()).first()
@@ -90,8 +91,8 @@ def get_device_status(current_user: User = Depends(get_current_user), db: Sessio
     }
 
 
-@router.get("/locations/today", response_model=LocationListResponse)
-def get_today_locations(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+@router.get("/locations/today", response_model=LocationListResponse, dependencies=[Depends(security)])
+def get_today_locations(current_user: User = Depends(get_current_user), db: Session = Depends(get_database)):
     """Rota protegida para buscar localizações do dispositivo do dia atual"""
     # Get today's date range (start and end of day)
     today = datetime.utcnow().date()
