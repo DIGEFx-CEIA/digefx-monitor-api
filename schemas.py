@@ -54,10 +54,8 @@ class AlertTypeResponse(BaseModel):
     code: str
     name: str
     description: Optional[str]
-    severity: str
     is_active: bool
     created_at: str
-    updated_at: str
 
 class AlertTypeListResponse(BaseModel):
     alert_types: List[AlertTypeResponse]

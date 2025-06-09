@@ -11,8 +11,7 @@ from config.security import security, get_current_user
 from config.database_config import get_database
 from models import Camera, CameraStatus, AlertType, User
 from schemas import (CameraCreate, CameraUpdate, CameraResponse, CameraListResponse, 
-                    CameraStatusResponse, CameraStatusListResponse, AlertTypeCreate, 
-                    AlertTypeResponse)
+                    CameraStatusResponse, CameraStatusListResponse)
 
 router = APIRouter(prefix="/cameras")
 
