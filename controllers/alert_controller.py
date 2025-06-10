@@ -29,7 +29,8 @@ def get_alert_types(current_user: User = Depends(get_current_user), db: Session 
             icon=alert_type.icon,
             color=alert_type.color,
             is_active=alert_type.is_active,
-            created_at=alert_type.created_at.strftime("%Y-%m-%d %H:%M:%S GMT") if alert_type.created_at else ""
+            created_at=alert_type.created_at.strftime("%Y-%m-%d %H:%M:%S GMT") if alert_type.created_at else "",
+            updated_at=alert_type.updated_at.strftime("%Y-%m-%d %H:%M:%S GMT") if alert_type.updated_at else ""
         ) for alert_type in alert_types
     ]
     
@@ -48,6 +49,7 @@ def create_alert_type(alert_type: AlertTypeCreate, current_user: User = Depends(
         code=alert_type.code,
         name=alert_type.name,
         description=alert_type.description,
+        icon=alert_type.icon,
         color=alert_type.color,
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow()
@@ -61,8 +63,11 @@ def create_alert_type(alert_type: AlertTypeCreate, current_user: User = Depends(
         code=new_alert_type.code,
         name=new_alert_type.name,
         description=new_alert_type.description or "",
+        icon=new_alert_type.icon,
+        color=new_alert_type.color,
         is_active=new_alert_type.is_active,
-        created_at=new_alert_type.created_at.strftime("%Y-%m-%d %H:%M:%S GMT")
+        created_at=new_alert_type.created_at.strftime("%Y-%m-%d %H:%M:%S GMT"),
+        updated_at=new_alert_type.updated_at.strftime("%Y-%m-%d %H:%M:%S GMT")
     )
 
 
