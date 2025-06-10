@@ -9,7 +9,7 @@ from typing import List
 
 from config.security import security, get_current_user
 from config.database_config import get_database
-from models import Camera, CameraStatus, AlertType, User
+from models import Camera, CameraStatus, AlertType, User, CameraAlert
 from schemas import (CameraCreate, CameraUpdate, CameraResponse, CameraListResponse, 
                     CameraStatusResponse, CameraStatusListResponse)
 
@@ -170,11 +170,43 @@ def update_camera(camera_id: int, camera_update: CameraUpdate, current_user: Use
 
 @router.delete("/{camera_id}", dependencies=[Depends(security)])
 def delete_camera(camera_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_database)):
-    """Deletar uma câmera"""
+    """Deletar uma câmera e todos os dados relacionados"""
     camera = db.query(Camera).filter(Camera.id == camera_id).first()
     if not camera:
         raise HTTPException(status_code=404, detail="Camera not found")
     
-    db.delete(camera)
-    db.commit()
-    return {"message": "Camera deleted successfully"} 
+    camera_name = camera.name
+    
+    try:
+        # Count related records for logging
+        status_count = db.query(CameraStatus).filter(CameraStatus.camera_id == camera_id).count()
+        alert_count = db.query(CameraAlert).filter(CameraAlert.camera_id == camera_id).count()
+        
+        # Delete related camera status records first
+        db.query(CameraStatus).filter(CameraStatus.camera_id == camera_id).delete()
+        print(f"Deleted {status_count} camera status records for camera {camera_name}")
+        
+        # Delete related camera alerts
+        db.query(CameraAlert).filter(CameraAlert.camera_id == camera_id).delete()
+        print(f"Deleted {alert_count} camera alert records for camera {camera_name}")
+        
+        # Now delete the camera itself
+        db.delete(camera)
+        db.commit()
+        
+        print(f"Successfully deleted camera '{camera_name}' (ID: {camera_id})")
+        
+        return {
+            "message": f"Camera '{camera_name}' and all related data deleted successfully",
+            "deleted_records": {
+                "camera_statuses": status_count,
+                "camera_alerts": alert_count
+            }
+        }
+        
+    except Exception as e:
+        db.rollback()
+        print(f"Error deleting camera '{camera_name}': {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error deleting camera: {str(e)}")
+    finally:
+        db.close() 
