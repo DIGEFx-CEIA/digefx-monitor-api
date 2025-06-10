@@ -39,6 +39,9 @@ def get_cameras(current_user: User = Depends(get_current_user), db: Session = De
 @router.get("/status", response_model=CameraStatusListResponse, dependencies=[Depends(security)])
 def get_cameras_status(current_user: User = Depends(get_current_user), db: Session = Depends(get_database)):
     """Obter status mais recente de todas as câmeras"""
+    # Get all cameras first
+    cameras = db.query(Camera).all()
+    
     # Get the latest status for each camera
     subquery = db.query(
         CameraStatus.camera_id,
@@ -53,10 +56,15 @@ def get_cameras_status(current_user: User = Depends(get_current_user), db: Sessi
         )
     ).all()
     
+    # Create a dictionary for quick lookup of statuses by camera_id
+    status_dict = {status.camera_id: status for status in latest_statuses}
+    
     status_responses = []
-    for status in latest_statuses:
-        camera = db.query(Camera).filter(Camera.id == status.camera_id).first()
-        if camera:
+    for camera in cameras:
+        status = status_dict.get(camera.id)
+        
+        if status:
+            # Camera has status record
             status_responses.append(CameraStatusResponse(
                 camera_id=camera.id,
                 camera_name=camera.name,
@@ -66,6 +74,18 @@ def get_cameras_status(current_user: User = Depends(get_current_user), db: Sessi
                 last_ping_time=status.last_ping_time.strftime("%Y-%m-%d %H:%M:%S GMT") if status.last_ping_time else None,
                 response_time_ms=status.response_time_ms,
                 timestamp=status.timestamp.strftime("%Y-%m-%d %H:%M:%S GMT")
+            ))
+        else:
+            # Camera has no status record yet - return with default values
+            status_responses.append(CameraStatusResponse(
+                camera_id=camera.id,
+                camera_name=camera.name,
+                camera_ip=camera.ip_address,
+                camera_port=camera.port,
+                is_connected=False,  # Default to false for new cameras
+                last_ping_time=None,
+                response_time_ms=None,
+                timestamp=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S GMT")  # Current time as placeholder
             ))
     
     return CameraStatusListResponse(statuses=status_responses, total_count=len(status_responses))
