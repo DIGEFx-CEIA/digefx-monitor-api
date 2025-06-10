@@ -26,6 +26,8 @@ def get_alert_types(current_user: User = Depends(get_current_user), db: Session 
             code=alert_type.code,
             name=alert_type.name,
             description=alert_type.description or "",
+            icon=alert_type.icon,
+            color=alert_type.color,
             is_active=alert_type.is_active,
             created_at=alert_type.created_at.strftime("%Y-%m-%d %H:%M:%S GMT") if alert_type.created_at else ""
         ) for alert_type in alert_types

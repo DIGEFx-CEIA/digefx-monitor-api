@@ -20,18 +20,6 @@ def get_db():
         db.close()
 
 
-def create_default_user():
-    """Cria usuário padrão admin/admin"""
-    db = SessionLocal()
-    user = db.query(User).filter(User.username == "admin").first()
-    if not user:
-        hashed_password = pwd_context.hash("admin")
-        new_user = User(username="admin", hashed_password=hashed_password)
-        db.add(new_user)
-        db.commit()
-    db.close()
-
-
 def authenticate_user(db, username: str, password: str):
     """Autentica um usuário"""
     user = db.query(User).filter(User.username == username).first()

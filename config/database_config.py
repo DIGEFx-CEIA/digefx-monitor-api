@@ -5,6 +5,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from .app_config import app_config
+from models import AlertType, Base as ModelsBase, User
+from passlib.context import CryptContext
 
 # Configurações do banco de dados
 DATABASE_URL = app_config.get_database_url()
@@ -33,14 +35,81 @@ def get_database():
 
 def create_tables():
     """Cria as tabelas no banco de dados"""
-    from models import Base as ModelsBase
     ModelsBase.metadata.create_all(bind=engine)
+    create_default_user()
+    create_default_alert_types()
     print("✅ Tabelas do banco de dados criadas com sucesso")
+
+def create_default_user():
+    """Cria usuário padrão admin/admin"""
+    db = SessionLocal()
+    user = db.query(User).filter(User.username == "admin").first()
+    if not user:
+        print("Criando usuário padrão admin/admin")
+        context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+        hashed_password = context.hash("admin")
+        new_user = User(username="admin", hashed_password=hashed_password)
+        db.add(new_user)
+        db.commit()
+    db.close()
+
+def create_default_alert_types():
+    """Create default alert types if they don't exist"""
+    db = SessionLocal()
+    try:
+        default_alerts = [
+            {
+                "code": "NO_HELMET", 
+                "name": "No Helmet Detected", 
+                "description": "Person detected without safety helmet",
+                "icon": "Construction",
+                "color": "#f44336"
+            },
+            {
+                "code": "NO_GLOVES", 
+                "name": "No Gloves Detected", 
+                "description": "Person detected without safety gloves",
+                "icon": "FrontHand",
+                "color": "#ff9800"
+            },
+            {
+                "code": "NO_SEAT_BELT", 
+                "name": "No Seat Belt", 
+                "description": "Driver detected without seat belt",
+                "icon": "AirlineSeatReclineNormal",
+                "color": "#2196f3"
+            },
+            {
+                "code": "SMOKING", 
+                "name": "Smoking Detected", 
+                "description": "Person detected smoking",
+                "icon": "SmokingRooms",
+                "color": "#9c27b0"
+            },
+            {
+                "code": "USING_CELL_PHONE", 
+                "name": "Cell Phone Usage", 
+                "description": "Person detected using cell phone",
+                "icon": "PhoneAndroid",
+                "color": "#4caf50"
+            },
+        ]
+        
+        for alert_data in default_alerts:
+            existing_alert = db.query(AlertType).filter(AlertType.code == alert_data["code"]).first()
+            if not existing_alert:
+                alert_type = AlertType(**alert_data)
+                db.add(alert_type)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"Error creating default alert types: {e}")
+    finally:
+        db.close()
 
 
 def drop_tables():
     """Remove todas as tabelas do banco de dados"""
-    from models import Base as ModelsBase
     ModelsBase.metadata.drop_all(bind=engine)
     print("❌ Tabelas do banco de dados removidas")
 

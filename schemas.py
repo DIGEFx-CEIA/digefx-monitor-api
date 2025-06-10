@@ -47,6 +47,8 @@ class AlertTypeCreate(BaseModel):
     code: str
     name: str
     description: Optional[str] = None
+    icon: Optional[str] = "Warning"  # Material-UI icon name
+    color: Optional[str] = "#ff9800"  # Hex color for the alert
     severity: str = "medium"  # low, medium, high, critical
 
 class AlertTypeResponse(BaseModel):
@@ -54,8 +56,11 @@ class AlertTypeResponse(BaseModel):
     code: str
     name: str
     description: Optional[str]
+    icon: Optional[str]
+    color: Optional[str]
     is_active: bool
     created_at: str
+    updated_at: str
 
 class AlertTypeListResponse(BaseModel):
     alert_types: List[AlertTypeResponse]

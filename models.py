@@ -88,8 +88,11 @@ class AlertType(Base):
     code = Column(String, unique=True, nullable=False)  # NO_HELMET, NO_GLOVES, etc.
     name = Column(String, nullable=False)
     description = Column(String)
+    icon = Column(String, default="Warning")  # Material-UI icon name
+    color = Column(String, default="#ff9800")  # Hex color for the alert
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 class CameraAlert(Base):
     __tablename__ = "camera_alerts"
@@ -107,33 +110,3 @@ class CameraAlert(Base):
     camera = relationship("Camera")
     alert_type = relationship("AlertType")
     resolved_by_user = relationship("User")
-
-# Criação do banco de dados e da tabela
-def init_database():
-    Base.metadata.create_all(bind=engine)
-    create_default_alert_types()
-
-def create_default_alert_types():
-    """Create default alert types if they don't exist"""
-    db = SessionLocal()
-    try:
-        default_alerts = [
-            {"code": "NO_HELMET", "name": "No Helmet Detected", "description": "Person detected without safety helmet"},
-            {"code": "NO_GLOVES", "name": "No Gloves Detected", "description": "Person detected without safety gloves"},
-            {"code": "NO_SEAT_BELT", "name": "No Seat Belt", "description": "Driver detected without seat belt"},
-            {"code": "SMOKING", "name": "Smoking Detected", "description": "Person detected smoking"},
-            {"code": "USING_CELL_PHONE", "name": "Cell Phone Usage", "description": "Person detected using cell phone"},
-        ]
-        
-        for alert_data in default_alerts:
-            existing_alert = db.query(AlertType).filter(AlertType.code == alert_data["code"]).first()
-            if not existing_alert:
-                alert_type = AlertType(**alert_data)
-                db.add(alert_type)
-        
-        db.commit()
-    except Exception as e:
-        db.rollback()
-        print(f"Error creating default alert types: {e}")
-    finally:
-        db.close()
