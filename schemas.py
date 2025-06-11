@@ -97,6 +97,7 @@ class CameraStatusResponse(BaseModel):
     camera_ip: str
     camera_port: int
     is_connected: bool
+    is_active: bool
     last_ping_time: Optional[str]
     response_time_ms: Optional[float]
     timestamp: str
