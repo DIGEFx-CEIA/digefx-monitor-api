@@ -22,7 +22,9 @@ def monitor_cameras():
             for camera in cameras:
                 start_time = time.time()
                 camera_connected = is_connected(camera.ip_address, camera.port)
-                response_time = (time.time() - start_time) * 1000  # Convert to milliseconds
+                # Convert to milliseconds and round to 2 decimal places
+                response_time = round((time.time() - start_time) * 1000, 2)  
+                
                 
                 # Save camera status to database
                 camera_status = CameraStatus(
