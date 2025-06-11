@@ -35,7 +35,7 @@ def get_database():
 
 def create_tables():
     """Cria as tabelas no banco de dados"""
-    ModelsBase.metadata.create_all(bind=engine)
+    ModelsBase.metadata.create_all(bind=engine, checkfirst=True)
     create_default_user()
     create_default_alert_types()
     print("✅ Tabelas do banco de dados criadas com sucesso")

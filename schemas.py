@@ -58,6 +58,7 @@ class AlertTypeResponse(BaseModel):
     description: Optional[str]
     icon: Optional[str]
     color: Optional[str]
+    severity: str
     is_active: bool
     created_at: str
     updated_at: str
@@ -112,8 +113,7 @@ class CameraStatusListResponse(BaseModel):
 class CameraAlertCreate(BaseModel):
     camera_id: int
     alert_type_id: int
-    message: str
-    severity: str = "medium"  # low, medium, high, critical
+    alert_metadata: Optional[Dict[str, Any]] = None
 
 class CameraAlertResponse(BaseModel):
     id: int
@@ -122,14 +122,12 @@ class CameraAlertResponse(BaseModel):
     alert_type_id: int
     alert_type_name: str
     alert_type_code: str
-    message: str
-    severity: str
-    is_resolved: bool
-    triggered_at: str
+    alert_metadata: Optional[Dict[str, Any]] = None
+    resolved: bool
     resolved_at: Optional[str]
-    created_at: str
-    updated_at: str
-
+    resolved_by: Optional[str]
+    triggered_at: str
+    severity: Optional[str]
 class CameraAlertListResponse(BaseModel):
     alerts: List[CameraAlertResponse]
     total_count: int

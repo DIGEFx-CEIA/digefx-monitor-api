@@ -90,6 +90,7 @@ class AlertType(Base):
     description = Column(String)
     icon = Column(String, default="Warning")  # Material-UI icon name
     color = Column(String, default="#ff9800")  # Hex color for the alert
+    severity = Column(String, default="medium")
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -98,9 +99,8 @@ class CameraAlert(Base):
     __tablename__ = "camera_alerts"
     id = Column(Integer, primary_key=True, index=True)
     camera_id = Column(Integer, ForeignKey("cameras.id"), nullable=False)
-    alert_type_code = Column(String, ForeignKey("alert_types.code"), nullable=False)
-    detection_timestamp = Column(DateTime, default=datetime.utcnow, index=True)
-    confidence_score = Column(Float)
+    alert_type_id = Column(Integer, ForeignKey("alert_types.id"), nullable=False)
+    triggered_at = Column(DateTime, default=datetime.utcnow, index=True)
     alert_metadata = Column(JSON)  # Additional data like bounding boxes, etc.
     resolved = Column(Boolean, default=False, index=True)
     resolved_at = Column(DateTime)
