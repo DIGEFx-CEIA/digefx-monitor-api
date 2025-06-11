@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-# Instala dependências do sistema para serial, banco e build
+# Instala dependências do sistema para serial, banco, build e execução no host
 RUN apt-get update && apt-get install -y \
     build-essential \
     libpq-dev \
@@ -8,6 +8,9 @@ RUN apt-get update && apt-get install -y \
     python3-dev \
     gcc \
     libudev-dev \
+    util-linux \
+    procps \
+    net-tools \
     && rm -rf /var/lib/apt/lists/*
 
 # Define diretório de trabalho

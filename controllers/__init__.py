@@ -5,6 +5,7 @@ from .auth_controller import router as auth_router
 from .device_controller import router as device_router
 from .camera_controller import router as camera_router
 from .alert_controller import router as alert_router
+from .terminal_controller import router as terminal_router
 
 
 def setup_routes(app):
@@ -13,6 +14,7 @@ def setup_routes(app):
     app.include_router(device_router, prefix="/api/v1", tags=["devices"])
     app.include_router(camera_router, prefix="/api/v1", tags=["cameras"])
     app.include_router(alert_router, prefix="/api/v1", tags=["alerts"])
+    app.include_router(terminal_router, prefix="/api/v1", tags=["terminal"])
 
 
 __all__ = [
@@ -20,5 +22,6 @@ __all__ = [
     'auth_router',
     'device_router', 
     'camera_router',
-    'alert_router'
+    'alert_router',
+    'terminal_router'
 ] 
