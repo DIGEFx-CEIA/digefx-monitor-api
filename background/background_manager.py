@@ -9,6 +9,7 @@ from .event_system import EventBus
 from .host_monitor import start_host_monitoring
 from .serial_monitor import start_serial_monitoring
 from .camera_monitor import start_camera_monitoring
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -34,12 +35,13 @@ class BackgroundManager:
             self.event_bus = EventBus()
             self.processor = CameraAlertProcessor(event_bus=self.event_bus)
             
-            # 3. Inicializar e iniciar processamento de alertas automaticamente
+            # 3. Inicializar processador (sem bloquear)
             await self.processor.initialize()
-            await self.processor.start_processing()
-            self._is_running = True
-            self._startup_completed = True
             
+            # 4. Iniciar processamento em background (não bloquear)
+            asyncio.create_task(self._start_alert_processing())
+            
+            self._startup_completed = True
             logger.info("✅ Background Manager iniciado com sucesso!")
             
         except Exception as e:
@@ -70,6 +72,17 @@ class BackgroundManager:
         except Exception as e:
             logger.error(f"❌ Erro ao iniciar monitores básicos: {e}")
             # Continuar mesmo com erro nos monitores
+    
+    async def _start_alert_processing(self):
+        """Inicia o processamento de alertas em background"""
+        try:
+            logger.info("🔄 Iniciando processamento de alertas em background...")
+            await self.processor.start_processing()
+            self._is_running = True
+            logger.info("✅ Processamento de alertas iniciado")
+        except Exception as e:
+            logger.error(f"❌ Erro ao iniciar processamento de alertas: {e}")
+            self._is_running = False
     
     async def shutdown(self):
         """Finalização graceful do sistema"""
@@ -126,11 +139,17 @@ class BackgroundManager:
         
         try:
             # Status do processamento de alertas
-            stats = self.processor.get_stats()
+            stats = self.processor.get_stats() if self.processor else {}
+            
+            # Determinar status do processamento de alertas
+            alert_processing_status = "running" if self._is_running else "starting"
+            if not self._is_running and self._startup_completed:
+                # Se startup completou mas não está rodando, pode estar iniciando ainda
+                alert_processing_status = "initializing"
             
             # Status geral do sistema
             system_status = {
-                "status": "running" if self._is_running else "stopped",
+                "status": "running",  # Background Manager está sempre running após startup
                 "is_running": self._is_running,
                 "startup_completed": self._startup_completed,
                 "basic_monitors": {
@@ -140,7 +159,7 @@ class BackgroundManager:
                     "status": "running" if self._monitors_started else "stopped"
                 },
                 "alert_processing": {
-                    "status": "running" if self._is_running else "stopped",
+                    "status": alert_processing_status,
                     **stats
                 }
             }
