@@ -18,7 +18,6 @@ class BackgroundManager:
     
     def __init__(self):
         self.processor: Optional[CameraAlertProcessor] = None
-        self.event_bus: Optional[EventBus] = None
         self._is_running = False
         self._startup_completed = False
         self._monitors_started = False
@@ -32,8 +31,7 @@ class BackgroundManager:
             self._start_basic_monitors()
             
             # 2. Iniciar sistema de processamento de alertas
-            self.event_bus = EventBus()
-            self.processor = CameraAlertProcessor(event_bus=self.event_bus)
+            self.processor = CameraAlertProcessor()
             
             # 3. Inicializar processador (sem bloquear)
             await self.processor.initialize()

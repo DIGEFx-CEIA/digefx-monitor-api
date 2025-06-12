@@ -94,10 +94,11 @@ class CameraProcessor:
         stats["is_running"] = self.is_running
         stats["camera_id"] = self.config.camera_id
         stats["camera_name"] = self.config.camera_name
-        
+        stats["last_alert_time"] = stats["last_alert_time"].isoformat() if stats["last_alert_time"] else None
         if stats["start_time"]:
-            uptime = datetime.utcnow() - stats["start_time"]
+            uptime = (datetime.utcnow() - stats["start_time"])
             stats["uptime_seconds"] = uptime.total_seconds()
+        stats["start_time"] = stats["start_time"].isoformat() if stats["start_time"] else None
         
         return stats
     

@@ -2,6 +2,7 @@
 Handler Database - Salva alertas no banco de dados quando são detectados
 """
 import asyncio
+import json
 import logging
 from datetime import datetime
 from typing import Dict, Any, Optional
@@ -59,8 +60,13 @@ class DatabaseHandler:
                     return False
                 
                 # Criar registro de alerta
-                alert_data = self._prepare_alert_data(event, camera, alert_type)
-                camera_alert = CameraAlert(**alert_data)
+                camera_alert = CameraAlert(
+                    camera_id=event.camera_id,
+                    alert_type_id=event.alert_type_id,
+                    triggered_at=event.detected_at,
+                    # corrige conversão do Dict para Json quando tem datetime dentro do dicionário
+                    alert_metadata=event.metadata
+                )
                 
                 # Salvar no banco
                 db.add(camera_alert)

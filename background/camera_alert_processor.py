@@ -13,6 +13,7 @@ from .handlers import (
     MQTTHandler, AMQPHandler, DatabaseHandler, FrigateHandler
 )
 from models import Camera, AlertType, SessionLocal
+from .event_system import event_bus
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +27,7 @@ class CameraAlertProcessor:
     - Monitorar status geral do sistema
     """
     
-    def __init__(self, event_bus: EventBus):
-        self.event_bus = event_bus
+    def __init__(self):
         self.camera_processors: Dict[int, CameraProcessor] = {}
         self.handlers = {}
         self.is_running = False
@@ -236,7 +236,7 @@ class CameraAlertProcessor:
             # Registrar handlers no event bus
             # O EventBus espera funções, então registramos os métodos handle_event
             for handler_name, handler in self.handlers.items():
-                await self.event_bus.subscribe(EventType.CAMERA_ALERT_DETECTED, handler.handle_event)
+                await event_bus.subscribe(EventType.CAMERA_ALERT_DETECTED, handler.handle_event)
                 logger.info(f"🔗 Handler {handler_name} registrado no EventBus")
             
         except Exception as e:
