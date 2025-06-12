@@ -8,8 +8,10 @@ from fastapi.openapi.utils import get_openapi
 from config.app_config import app_config
 from config.database_config import create_tables
 from controllers import setup_routes
-from background import start_all_background_services
+from background.background_manager import background_manager
+import logging
 
+logger = logging.getLogger(__name__)
 
 # Inicialização da aplicação
 app = FastAPI(
@@ -73,13 +75,39 @@ app.openapi = custom_openapi
 @app.on_event("startup")
 async def startup_event():
     """Inicialização da aplicação"""
-    # Criar tabelas do banco de dados
-    create_tables()
-    
-    # Iniciar serviços de background
-    start_all_background_services()
-    
-    print("✅ DIGEF-X Power Management API v2.0 iniciada com sucesso!")
+    try:
+        logger.info("🚀 Iniciando DIGEF-X Power Management API v2.0...")
+        
+        # Criar tabelas do banco de dados
+        create_tables()
+        logger.info("✅ Banco de dados inicializado")
+        
+        # Auto-startup do Background Manager
+        await background_manager.startup()
+        logger.info("✅ Background Manager inicializado")
+        
+        logger.info("🎉 DIGEF-X Power Management API v2.0 iniciada com sucesso!")
+        
+    except Exception as e:
+        logger.error(f"❌ Erro durante startup da aplicação: {e}")
+        # Continuar execução mesmo com erro no background
+        logger.warning("⚠️ Aplicação continuará sem background processing")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Finalização graceful da aplicação"""
+    try:
+        logger.info("🛑 Finalizando DIGEF-X Power Management API...")
+        
+        # Finalizar Background Manager
+        await background_manager.shutdown()
+        logger.info("✅ Background Manager finalizado")
+        
+        logger.info("👋 API finalizada com sucesso!")
+        
+    except Exception as e:
+        logger.error(f"❌ Erro durante shutdown: {e}")
 
 
 @app.get("/")
