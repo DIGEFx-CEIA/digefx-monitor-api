@@ -1,6 +1,7 @@
 """
 Aplicação principal refatorada com estrutura modular
 """
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
@@ -13,6 +14,43 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Gerenciamento do ciclo de vida da aplicação"""
+    # Startup
+    try:
+        logger.info("🚀 Iniciando DIGEF-X Power Management API v2.0...")
+        
+        # Criar tabelas do banco de dados
+        create_tables()
+        logger.info("✅ Banco de dados inicializado")
+        
+        # Auto-startup do Background Manager
+        await background_manager.startup()
+        logger.info("✅ Background Manager inicializado")
+        
+        logger.info("🎉 DIGEF-X Power Management API v2.0 iniciada com sucesso!")
+        
+    except Exception as e:
+        logger.error(f"❌ Erro durante startup da aplicação: {e}")
+        # Continuar execução mesmo com erro no background
+        logger.warning("⚠️ Aplicação continuará sem background processing")
+    
+    yield
+    
+    # Shutdown
+    try:
+        logger.info("🛑 Finalizando DIGEF-X Power Management API...")
+        
+        # Finalizar Background Manager
+        await background_manager.shutdown()
+        logger.info("✅ Background Manager finalizado")
+        
+        logger.info("👋 API finalizada com sucesso!")
+        
+    except Exception as e:
+        logger.error(f"❌ Erro durante shutdown: {e}")
+
 # Inicialização da aplicação
 app = FastAPI(
     title="DIGEF-X Power Management API",
@@ -20,7 +58,8 @@ app = FastAPI(
     version="2.0.0",
     swagger_ui_parameters={
         "persistAuthorization": True,
-    }
+    },
+    lifespan=lifespan
 )
 
 # Configuração de segurança para Swagger
@@ -70,44 +109,6 @@ def custom_openapi():
 
 
 app.openapi = custom_openapi
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Inicialização da aplicação"""
-    try:
-        logger.info("🚀 Iniciando DIGEF-X Power Management API v2.0...")
-        
-        # Criar tabelas do banco de dados
-        create_tables()
-        logger.info("✅ Banco de dados inicializado")
-        
-        # Auto-startup do Background Manager
-        await background_manager.startup()
-        logger.info("✅ Background Manager inicializado")
-        
-        logger.info("🎉 DIGEF-X Power Management API v2.0 iniciada com sucesso!")
-        
-    except Exception as e:
-        logger.error(f"❌ Erro durante startup da aplicação: {e}")
-        # Continuar execução mesmo com erro no background
-        logger.warning("⚠️ Aplicação continuará sem background processing")
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Finalização graceful da aplicação"""
-    try:
-        logger.info("🛑 Finalizando DIGEF-X Power Management API...")
-        
-        # Finalizar Background Manager
-        await background_manager.shutdown()
-        logger.info("✅ Background Manager finalizado")
-        
-        logger.info("👋 API finalizada com sucesso!")
-        
-    except Exception as e:
-        logger.error(f"❌ Erro durante shutdown: {e}")
 
 
 @app.get("/")
