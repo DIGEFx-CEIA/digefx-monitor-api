@@ -11,47 +11,52 @@ from config.database_config import create_tables
 from controllers import setup_routes
 from background.background_manager import background_manager
 import logging
+import asyncio
 
 logger = logging.getLogger(__name__)
 
-# Flag para controlar se o background está pronto
+# Flag para controlar se o sistema básico está pronto
+_system_ready = False
+# Flag para controlar se o background completo está pronto
 _background_ready = False
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Gerenciamento do ciclo de vida da aplicação"""
-    global _background_ready
+    global _system_ready, _background_ready
     
-    # Startup - Inicializar background ANTES da aplicação ficar disponível
+    # Startup - Inicializar sistemas críticos RAPIDAMENTE
     try:
         logger.info("🚀 Iniciando DIGEF-X Power Management API v2.0...")
         
-        # 1. Criar tabelas do banco de dados
+        # 1. Criar tabelas do banco de dados (rápido)
         create_tables()
         logger.info("✅ Banco de dados inicializado")
         
-        # 2. Inicializar Background Manager (CRÍTICO - deve completar antes da API)
-        logger.info("⏳ Inicializando sistema de background...")
-        await background_manager.startup()
-        logger.info("✅ Background Manager inicializado")
+        # 2. Inicializar Background Manager (não-bloqueante)
+        logger.info("⚡ Inicializando sistema de background (não-bloqueante)...")
+        await background_manager.startup()  # Agora retorna imediatamente
+        logger.info("✅ Background Manager startup concluído")
         
-        # 3. Marcar background como pronto (API disponível)
-        _background_ready = True
+        # 3. Sistema básico está pronto (API pode receber requisições)
+        _system_ready = True
         logger.info("🎉 DIGEF-X Power Management API v2.0 PRONTA para receber requisições!")
-        logger.info("🔄 Processamento de alertas iniciando em background...")
+        
+        # 4. Monitorar inicialização do background em separado
+        asyncio.create_task(_monitor_background_initialization())
         
     except Exception as e:
         logger.error(f"❌ ERRO CRÍTICO durante startup: {e}")
-        # Se o background falhar, a aplicação não deve ficar disponível
-        _background_ready = False
-        logger.error("🚫 API NÃO ESTÁ PRONTA - Background falhou na inicialização")
-        raise  # Isso fará o uvicorn falhar e não aceitar conexões
+        # Mesmo com erro, permitir que a API funcione (para debug)
+        _system_ready = True
+        logger.warning("⚠️  API disponível com funcionalidade limitada devido a erro na inicialização")
     
-    yield  # Aplicação fica disponível APENAS se chegou até aqui
+    yield
     
     # Shutdown
     try:
         logger.info("🛑 Finalizando DIGEF-X Power Management API...")
+        _system_ready = False
         _background_ready = False
         
         # Finalizar Background Manager
@@ -62,6 +67,36 @@ async def lifespan(app: FastAPI):
         
     except Exception as e:
         logger.error(f"❌ Erro durante shutdown: {e}")
+
+async def _monitor_background_initialization():
+    """Monitora a inicialização completa do background em separado"""
+    global _background_ready
+    
+    try:
+        # Aguardar até que o background esteja completamente inicializado
+        max_wait_time = 120  # 2 minutos máximo
+        wait_interval = 2    # Verificar a cada 2 segundos
+        elapsed_time = 0
+        
+        while elapsed_time < max_wait_time:
+            if background_manager.is_ready:
+                _background_ready = True
+                logger.info("🎯 Background System completamente inicializado!")
+                logger.info("🔄 Processamento de alertas de câmeras ativo")
+                break
+            
+            await asyncio.sleep(wait_interval)
+            elapsed_time += wait_interval
+            
+            if elapsed_time % 10 == 0:  # Log a cada 10 segundos
+                logger.info(f"⏳ Aguardando inicialização completa do background... ({elapsed_time}s)")
+        
+        if not _background_ready:
+            logger.warning("⚠️  Background system não foi completamente inicializado no tempo esperado")
+            logger.warning("⚠️  API funcionará com funcionalidade limitada de alertas")
+            
+    except Exception as e:
+        logger.error(f"❌ Erro ao monitorar inicialização do background: {e}")
 
 # Inicialização da aplicação
 app = FastAPI(
@@ -74,26 +109,39 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Middleware para verificar se background está pronto
+# Middleware para verificar status do sistema (mais permissivo)
 @app.middleware("http")
-async def check_background_ready(request, call_next):
-    """Middleware que bloqueia apenas endpoints críticos se o background não estiver pronto"""
-    # Endpoints sempre disponíveis
+async def check_system_ready(request, call_next):
+    """Middleware que verifica se o sistema básico está pronto"""
+    # Endpoints sempre disponíveis (mesmo durante inicialização)
     always_available = ["/", "/health", "/docs", "/openapi.json", "/redoc"]
     
     # Endpoints de background sempre disponíveis (para monitoramento)
     background_endpoints = ["/background/status", "/background/health"]
     
-    # Permitir endpoints básicos e de monitoramento
-    if any(request.url.path.startswith(path) for path in always_available + background_endpoints):
+    # Endpoints básicos (não dependem do background completo)
+    basic_endpoints = ["/api/v1/auth", "/api/v1/devices", "/api/v1/cameras"]
+    
+    # Permitir endpoints básicos mesmo se background não estiver 100% pronto
+    if any(request.url.path.startswith(path) for path in always_available + background_endpoints + basic_endpoints):
         return await call_next(request)
     
-    # Para outros endpoints, verificar se background está pronto
-    if not _background_ready:
+    # Para endpoints avançados, verificar se sistema básico está pronto
+    if not _system_ready:
         raise HTTPException(
             status_code=503, 
             detail="Sistema ainda inicializando. Aguarde alguns segundos e tente novamente."
         )
+    
+    # Endpoints que dependem especificamente do background completo
+    background_dependent = ["/api/v1/alerts"]
+    
+    if any(request.url.path.startswith(path) for path in background_dependent):
+        if not _background_ready:
+            raise HTTPException(
+                status_code=503,
+                detail="Sistema de alertas ainda inicializando. Aguarde e tente novamente."
+            )
     
     return await call_next(request)
 
@@ -122,22 +170,14 @@ def custom_openapi():
         routes=app.routes,
     )
     
-    # Limpar security schemes existentes e adicionar apenas o nosso
+    # Configurar esquema de segurança
     openapi_schema["components"]["securitySchemes"] = {
         "BearerAuth": {
             "type": "http",
             "scheme": "bearer",
-            "bearerFormat": "JWT",
-            "description": "Insira o token JWT obtido no endpoint /api/v1/login"
+            "bearerFormat": "JWT"
         }
     }
-    
-    # Atualizar todos os paths protegidos para usar BearerAuth
-    for path, path_item in openapi_schema["paths"].items():
-        for method, operation in path_item.items():
-            if method.upper() in ["GET", "POST", "PUT", "DELETE", "PATCH"] and "security" in operation:
-                # Substituir qualquer security scheme por BearerAuth
-                operation["security"] = [{"BearerAuth": []}]
     
     app.openapi_schema = openapi_schema
     return app.openapi_schema
@@ -151,7 +191,8 @@ async def root():
     """Endpoint raiz da API"""
     return {
         "message": "DIGEF-X Power Management API v2.0",
-        "status": "ready" if _background_ready else "initializing",
+        "status": "ready" if _system_ready else "initializing",
+        "system_ready": _system_ready,
         "background_ready": _background_ready,
         "documentation": "/docs"
     }
@@ -160,17 +201,22 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Verificação de saúde da API"""
-    status = "healthy" if _background_ready else "initializing"
+    status = "healthy"
+    if not _system_ready:
+        status = "initializing"
+    elif not _background_ready:
+        status = "partially_ready"
     
     health_data = {
         "status": status,
         "version": "2.0.0",
+        "system_ready": _system_ready,
         "background_ready": _background_ready,
         "uptime": "ok"
     }
     
     # Se background estiver pronto, incluir detalhes
-    if _background_ready and background_manager.is_ready:
+    if _system_ready and background_manager.is_ready:
         try:
             bg_status = background_manager.get_status()
             health_data["background_status"] = bg_status

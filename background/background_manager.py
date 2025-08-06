@@ -21,31 +21,47 @@ class BackgroundManager:
         self._is_running = False
         self._startup_completed = False
         self._monitors_started = False
+        self._initialization_task = None
     
     async def startup(self):
-        """Inicialização automática do sistema de background"""
+        """Inicialização não-bloqueante do sistema de background"""
         try:
-            logger.info("🚀 Iniciando Background Manager...")
+            logger.info("🚀 Iniciando Background Manager (modo não-bloqueante)...")
             
-            # 1. Iniciar monitores básicos existentes (sempre executam)
+            # 1. Iniciar monitores básicos imediatamente (síncronos)
             self._start_basic_monitors()
             
-            # 2. Iniciar sistema de processamento de alertas
-            self.processor = CameraAlertProcessor()
+            # 2. Iniciar inicialização completa em background
+            self._initialization_task = asyncio.create_task(self._initialize_background_systems())
             
-            # 3. Inicializar processador (sem bloquear)
-            await self.processor.initialize()
-            
-            # 4. Iniciar processamento em background (não bloquear)
-            asyncio.create_task(self._start_alert_processing())
-            
-            self._startup_completed = True
-            logger.info("✅ Background Manager iniciado com sucesso!")
+            # 3. Retornar imediatamente - não aguardar a inicialização completa
+            logger.info("✅ Background Manager startup iniciado - sistemas inicializando em background...")
             
         except Exception as e:
             logger.error(f"❌ Erro ao iniciar Background Manager: {e}")
             self._startup_completed = True  # Marcar como completo mesmo com erro
             raise
+    
+    async def _initialize_background_systems(self):
+        """Inicialização completa dos sistemas de background (executado em background)"""
+        try:
+            logger.info("🔄 Inicializando sistemas de background...")
+            
+            # 1. Criar e inicializar o processador de alertas
+            self.processor = CameraAlertProcessor()
+            await self.processor.initialize()
+            logger.info("✅ CameraAlertProcessor inicializado")
+            
+            # 2. Iniciar processamento de alertas em background
+            asyncio.create_task(self._start_alert_processing())
+            
+            # 3. Marcar como inicializado
+            self._startup_completed = True
+            logger.info("🎉 Todos os sistemas de background inicializados com sucesso!")
+            
+        except Exception as e:
+            logger.error(f"❌ Erro durante inicialização dos sistemas de background: {e}")
+            self._startup_completed = True  # Marcar como completo mesmo com erro
     
     def _start_basic_monitors(self):
         """Inicia os monitores básicos (host, serial, camera)"""
@@ -87,6 +103,14 @@ class BackgroundManager:
         try:
             logger.info("🛑 Finalizando Background Manager...")
             
+            # Cancelar task de inicialização se ainda estiver rodando
+            if self._initialization_task and not self._initialization_task.done():
+                self._initialization_task.cancel()
+                try:
+                    await self._initialization_task
+                except asyncio.CancelledError:
+                    logger.info("Task de inicialização cancelada")
+            
             # Parar processamento de alertas
             if self.processor and self._is_running:
                 await self.processor.stop_processing()
@@ -124,9 +148,16 @@ class BackgroundManager:
     def get_status(self) -> dict:
         """Status atual do sistema"""
         if not self._startup_completed:
+            initialization_status = "starting"
+            if self._initialization_task:
+                if self._initialization_task.done():
+                    initialization_status = "completed" if not self._initialization_task.exception() else "failed"
+                else:
+                    initialization_status = "initializing"
+            
             return {
-                "status": "starting",
-                "message": "Sistema iniciando..."
+                "status": initialization_status,
+                "message": "Sistema inicializando em background..." if initialization_status == "initializing" else "Sistema iniciando..."
             }
         
         if not self.processor:
