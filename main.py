@@ -28,14 +28,10 @@ async def lifespan(app: FastAPI):
     # Startup - Inicializar sistemas críticos RAPIDAMENTE
     try:
         logger.info("🚀 Iniciando DIGEF-X Power Management API v2.0...")
-        
-        # 1. Criar tabelas do banco de dados (rápido)
         create_tables()
         logger.info("✅ Banco de dados inicializado")
-        
-        # 2. Inicializar Background Manager (não-bloqueante)
-        logger.info("⚡ Inicializando sistema de background (não-bloqueante)...")
-        await background_manager.startup()  # Agora retorna imediatamente
+        logger.info("⚡ Inicializando sistema de background...")
+        await background_manager.startup() 
         logger.info("✅ Background Manager startup concluído")
         
         # 3. Sistema básico está pronto (API pode receber requisições)

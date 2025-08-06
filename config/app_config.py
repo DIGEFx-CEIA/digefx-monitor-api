@@ -2,6 +2,7 @@
 Configurações da aplicação
 """
 import os
+from pathlib import Path
 from typing import Optional
 
 class AppConfig:
@@ -11,6 +12,18 @@ class AppConfig:
     APP_NAME: str = "DIGEF-X Power Management API"
     APP_VERSION: str = "2.0.0"
     APP_DESCRIPTION: str = "API para monitoramento de energia e gerenciamento de dispositivos"
+
+    # Diretórios
+    BASE_DIR = Path(__file__).parent.absolute()
+    VIDEO_DIR = Path("/home/digefx/Documents/digefx_monitor/frigate/storage/recordings/2025-08-06")  # No Docker será mapeado via volume
+    METADATA_DIR = BASE_DIR / "metadata"
+    LOGS_DIR = BASE_DIR / "logs"
+    
+    # Configurações de detecção
+    MEDIAPIPE_CONFIDENCE = float(os.getenv("MEDIAPIPE_CONFIDENCE", 0.5))
+    YOLO_CONFIDENCE = float(os.getenv("YOLO_CONFIDENCE", 0.6))
+    YOLO_MODEL = os.getenv("YOLO_MODEL", "yolov8n.pt")
+    
     
     # Configurações de servidor
     HOST: str = "0.0.0.0"
@@ -56,6 +69,13 @@ class AppConfig:
     def is_debug(cls) -> bool:
         """Verifica se está em modo debug"""
         return cls.DEBUG
+
+    @classmethod
+    def ensure_directories(cls):
+        """Garante que os diretórios necessários existem"""
+        cls.METADATA_DIR.mkdir(exist_ok=True)
+        cls.LOGS_DIR.mkdir(exist_ok=True)
+        cls.VIDEO_DIR.mkdir(exist_ok=True)
 
 
 # Instância global da configuração

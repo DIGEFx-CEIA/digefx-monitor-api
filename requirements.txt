@@ -58,9 +58,11 @@ opencv-python==4.11.0.86
 opt_einsum==3.4.0
 packaging==25.0
 paho-mqtt==2.1.0
+pamqp==3.3.0
 pandas==2.3.0
 passlib==1.7.4
 pillow==11.2.1
+propcache==0.3.2
 protobuf==4.25.8
 psutil==7.0.0
 py-cpuinfo==9.0.0
@@ -98,3 +100,5 @@ ultralytics==8.3.154
 ultralytics-thop==2.0.14
 urllib3==2.3.0
 uvicorn==0.34.0
+watchdog==6.0.0
+yarl==1.20.1

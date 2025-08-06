@@ -6,12 +6,61 @@ import logging
 from typing import Optional
 from .camera_alert_processor import CameraAlertProcessor
 from .event_system import EventBus
+from config import app_config
 from .host_monitor import start_host_monitoring
 from .serial_monitor import start_serial_monitoring
 from .camera_monitor import start_camera_monitoring
+from .file_processor import process_new_video
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
 import asyncio
 
 logger = logging.getLogger(__name__)
+
+
+class VideoFileHandler(FileSystemEventHandler):
+    """Handler para monitorar novos arquivos de vídeo"""    
+
+    def __init__(self, controller):
+        self.logger = logging.getLogger(__name__)
+        self.controller = controller
+        self.loop = None
+
+    def set_event_loop(self, loop):
+        """Define o loop de eventos para executar tarefas assíncronas"""
+        self.loop = loop
+
+    def on_created(self, event):
+        """Chamado quando um novo arquivo é criado"""
+        if not event.is_directory:
+            file_path = event.src_path
+            if file_path.endswith('.mp4'):
+                self.logger.info(f"Novo arquivo detectado: {file_path}")
+                self._schedule_async_processing(file_path)
+
+    def _schedule_async_processing(self, file_path: str):
+        """Agenda o processamento assíncrono do arquivo de vídeo"""
+        try:
+            if self.loop and not self.loop.is_closed():
+                # Executar a corrotina no loop de eventos principal de forma thread-safe
+                future = asyncio.run_coroutine_threadsafe(
+                    process_new_video(file_path), 
+                    self.loop
+                )
+                # Opcional: adicionar callback para capturar erros
+                future.add_done_callback(self._handle_processing_result)
+            else:
+                self.logger.error("Loop de eventos não disponível para processar arquivo")
+        except Exception as e:
+            self.logger.error(f"Erro ao agendar processamento do arquivo {file_path}: {e}")
+
+    def _handle_processing_result(self, future):
+        """Callback para lidar com o resultado do processamento"""
+        try:
+            result = future.result()  # Isso irá levantar qualquer exceção que ocorreu
+            self.logger.debug("Processamento de arquivo concluído com sucesso")
+        except Exception as e:
+            self.logger.error(f"Erro durante processamento assíncrono: {e}")
 
 class BackgroundManager:
     """Gerenciador global do sistema de background"""
@@ -22,7 +71,8 @@ class BackgroundManager:
         self._startup_completed = False
         self._monitors_started = False
         self._initialization_task = None
-    
+        app_config.ensure_directories()  # Garantir que os diretórios existem
+
     async def startup(self):
         """Inicialização não-bloqueante do sistema de background"""
         try:
@@ -30,7 +80,7 @@ class BackgroundManager:
             
             # 1. Iniciar monitores básicos imediatamente (síncronos)
             self._start_basic_monitors()
-            
+            self._start_file_monitoring()
             # 2. Iniciar inicialização completa em background
             self._initialization_task = asyncio.create_task(self._initialize_background_systems())
             
@@ -53,7 +103,7 @@ class BackgroundManager:
             logger.info("✅ CameraAlertProcessor inicializado")
             
             # 2. Iniciar processamento de alertas em background
-            asyncio.create_task(self._start_alert_processing())
+            # asyncio.create_task(self._start_alert_processing())
             
             # 3. Marcar como inicializado
             self._startup_completed = True
@@ -86,6 +136,30 @@ class BackgroundManager:
         except Exception as e:
             logger.error(f"❌ Erro ao iniciar monitores básicos: {e}")
             # Continuar mesmo com erro nos monitores
+
+    def _start_file_monitoring(self):
+        # Configurar observador para novos arquivos
+        event_handler = VideoFileHandler(self)
+        
+        # Passar o loop de eventos atual para o handler
+        try:
+            current_loop = asyncio.get_running_loop()
+            event_handler.set_event_loop(current_loop)
+            logger.info("Loop de eventos configurado para o VideoFileHandler")
+        except RuntimeError:
+            # Se não há loop rodando, tentar obter o loop padrão
+            try:
+                current_loop = asyncio.get_event_loop()
+                event_handler.set_event_loop(current_loop)
+                logger.warning("Usando loop de eventos padrão para VideoFileHandler")
+            except Exception as e:
+                logger.error(f"Não foi possível configurar loop de eventos: {e}")
+        
+        self.observer = Observer()
+        self.observer.schedule(event_handler, str(app_config.VIDEO_DIR), recursive=True)
+        # Iniciar monitoramento
+        self.observer.start()
+        logger.info("Monitoramento iniciado. Aguardando novos arquivos...")
     
     async def _start_alert_processing(self):
         """Inicia o processamento de alertas em background"""
@@ -102,6 +176,12 @@ class BackgroundManager:
         """Finalização graceful do sistema"""
         try:
             logger.info("🛑 Finalizando Background Manager...")
+            
+            # Parar o observer de arquivos
+            if hasattr(self, 'observer') and self.observer:
+                self.observer.stop()
+                self.observer.join()
+                logger.info("✅ File Observer finalizado")
             
             # Cancelar task de inicialização se ainda estiver rodando
             if self._initialization_task and not self._initialization_task.done():
@@ -212,6 +292,7 @@ class BackgroundManager:
     @property
     def monitors_running(self) -> bool:
         return self._monitors_started
+
 
 # Instância global
 background_manager = BackgroundManager() 

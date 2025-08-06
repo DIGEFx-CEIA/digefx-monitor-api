@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from .event_system import EventBus, EventType
 from .camera_processor import CameraProcessor, CameraConfig, CameraProcessorFactory
 from .handlers import (
-    MQTTHandler, AMQPHandler, DatabaseHandler, FrigateHandler
+    MQTTHandler, AMQPHandler, DatabaseHandler, FrigateHandler, NewVideoHandler
 )
 from models import Camera, AlertType, SessionLocal
 from .event_system import event_bus
@@ -107,7 +107,7 @@ class CameraAlertProcessor:
         """Loop principal que monitora câmeras e gerencia processadores"""
         while not self._stop_event.is_set():
             try:
-                await self._check_and_update_cameras()
+                # await self._check_and_update_cameras()
                 self._update_stats()
                 
                 # Aguardar próxima verificação
@@ -238,6 +238,13 @@ class CameraAlertProcessor:
             for handler_name, handler in self.handlers.items():
                 await event_bus.subscribe(EventType.CAMERA_ALERT_DETECTED, handler.handle_event)
                 logger.info(f"🔗 Handler {handler_name} registrado no EventBus")
+
+            videoHandler = NewVideoHandler()
+            await videoHandler.initialize()
+            logger.info("✅ NewVideoHandler inicializado")
+            await event_bus.subscribe(EventType.NEW_VIDEO_FILE, videoHandler.handle_event)
+            logger.info("🔗 NewVideoHandler registrado no EventBus")
+            
             
         except Exception as e:
             logger.error(f"Erro ao inicializar handlers: {e}")

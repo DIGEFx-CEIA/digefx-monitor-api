@@ -20,6 +20,7 @@ class EventType(Enum):
     CAMERA_PROCESSING_STARTED = "camera_processing_started"
     CAMERA_PROCESSING_STOPPED = "camera_processing_stopped"
     CAMERA_STATUS_CHANGED = "camera_status_changed"
+    NEW_VIDEO_FILE = "new_video_file"
 
 @dataclass
 class AlertEvent:
@@ -47,6 +48,15 @@ class CameraStatusEvent:
     camera_id: int
     camera_name: str
     status: str  # started, stopped, error
+    timestamp: datetime
+    metadata: Dict[str, Any]
+
+@dataclass
+class NewVideoFileEvent:
+    """Estrutura de dados para eventos de novo arquivo de vídeo"""
+    event_id: str
+    event_type: EventType
+    file_path: str
     timestamp: datetime
     metadata: Dict[str, Any]
 
@@ -80,7 +90,7 @@ class EventBus:
                 except ValueError:
                     logger.warning(f"Handler {handler.__name__} não encontrado para evento {event_type.value}")
     
-    async def publish(self, event: AlertEvent | CameraStatusEvent):
+    async def publish(self, event: AlertEvent | CameraStatusEvent | NewVideoFileEvent):
         """Publica um evento para todos os subscribers"""
         event_type = event.event_type
         
@@ -114,7 +124,7 @@ class EventBus:
                 else:
                     logger.debug(f"Handler {handler_name} executado com sucesso")
     
-    async def _safe_call_handler(self, handler: Callable, event: AlertEvent | CameraStatusEvent):
+    async def _safe_call_handler(self, handler: Callable, event: AlertEvent | CameraStatusEvent | NewVideoFileEvent):
         """Executa handler com tratamento de erro"""
         try:
             if asyncio.iscoroutinefunction(handler):
@@ -127,7 +137,7 @@ class EventBus:
             logger.error(f"Erro no handler {handler.__name__}: {e}")
             raise
     
-    async def _add_to_history(self, event: AlertEvent | CameraStatusEvent):
+    async def _add_to_history(self, event: AlertEvent | CameraStatusEvent | NewVideoFileEvent):
         """Adiciona evento ao histórico"""
         async with self._lock:
             event_dict = {
@@ -201,3 +211,16 @@ def create_camera_status_event(
         timestamp=datetime.utcnow(),
         metadata=metadata
     ) 
+
+def create_new_video_file_event(
+    file_path: str,
+    metadata: Dict[str, Any]
+) -> NewVideoFileEvent:
+    """Factory function para criar eventos de novo arquivo de vídeo"""
+    return NewVideoFileEvent(
+        event_id=str(uuid.uuid4()),
+        event_type=EventType.NEW_VIDEO_FILE,
+        file_path=file_path,
+        timestamp=datetime.utcnow(),
+        metadata=metadata
+    )
