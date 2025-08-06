@@ -177,7 +177,7 @@ class CameraAlertProcessor:
                 await self.camera_processors[camera.id].update_config(camera_config)
             else:
                 # Criar novo processador
-                processor = CameraProcessorFactory.create_processor(camera_config)
+                processor = CameraProcessorFactory.create_processor(camera_config,model_path="models/V11n-ND-V2.pt")
                 self.camera_processors[camera.id] = processor
                 
                 # Iniciar processamento em background
