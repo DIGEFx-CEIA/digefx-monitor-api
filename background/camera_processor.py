@@ -129,8 +129,8 @@ class CameraProcessor:
             try:
                 start_time = time.time()
                 frame_data = await self._capture_frame()
-                logger.warning(f"Frame capturado da câmera {self.config.camera_id}")
-                if not frame_data or (len(frame_data.get("frame")) == 0):
+                logger.warning(f"MediaPipe. Frame capturado da câmera {self.config.camera_id}")
+                if not frame_data or frame_data.get("frame") is None:
                     logger.warning(f"Frame vazio ou inválido da câmera {self.config.camera_id}, aguardando próximo frame.")
                     await asyncio.sleep(frame_interval)
                     continue
@@ -169,16 +169,12 @@ class CameraProcessor:
     async def _capture_frame(self) -> Optional[Dict[str, Any]]:
         rtsp_url = "rtsp://admin:digefx@2024@" + self.config.camera_ip + ":" + str(self.config.camera_port) + "/cam/realmonitor?channel=1&subtype=0"
         cap = cv2.VideoCapture(rtsp_url)
-        logger.info("Imagem capturada")
         if not cap.isOpened():
-            print(f"Erro ao conectar na câmera: {rtsp_url}")
-            retry_count += 1
-            time.sleep(2)  # Esperar 2 segundos antes de tentar novamente
+            logger.error(f"Erro ao conectar na câmera: {rtsp_url}")
+            await asyncio.sleep(2)  # Usar sleep assíncrono
             return None
         ret, frame = cap.read()
-        logger.info("Frame lido")
         cap.release()
-        logger.info("Conexao liberada")
         
         # return the object with dimensions and data using OpenCV
         if frame is None:
@@ -188,7 +184,6 @@ class CameraProcessor:
             logger.warning(f"Falha ao capturar frame da câmera {self.config.camera_id}")
             return None
         self.processing_stats["frames_processed"] += 1
-        logger.info("frame processo com sucesso (ou erro)")
         return {
             "timestamp": datetime.utcnow(),
             "frame_id": self.processing_stats["frames_processed"],
@@ -341,7 +336,8 @@ class CameraProcessor:
         adversidades_diretas = {"fumando_cigarro", "sem_cinto", "usando_celular"}
         while not self._stop_event.is_set() and self.config.is_active:
             frame_data = await self._capture_frame()
-            if not frame_data or (len(frame_data.get("frame")) == 0):
+            logger.warning(f"Yolo. Frame capturado da câmera {self.config.camera_id}")
+            if not frame_data or frame_data.get("frame") is None:
                 await asyncio.sleep(frame_interval)
                 continue
 
@@ -380,8 +376,7 @@ class CameraProcessor:
                     await self._handle_detection(det)
 
             # Verificar se a pessoa ainda está presente usando MediaPipe
-            img_array = np.frombuffer(frame_data["data"], np.uint8)
-            frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+            frame = frame_data.get("frame")
             pessoa_ainda_presente = self.detect_person_mediapipe(frame) if frame is not None else False
             if not pessoa_ainda_presente:
                 logger.info("Pessoa não detectada, encerrando loop YOLO.")
