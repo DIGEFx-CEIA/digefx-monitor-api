@@ -15,7 +15,7 @@ class AppConfig:
 
     # Diretórios
     BASE_DIR = Path(__file__).parent.absolute()
-    VIDEO_DIR = Path("/home/digefx/Documents/digefx_monitor/frigate/storage/recordings/2025-08-06")  # No Docker será mapeado via volume
+    VIDEO_DIR = Path("/home/digefx/Documents/digefx_monitor/frigate/storage/recordings/2025-08-07")  # No Docker será mapeado via volume
     METADATA_DIR = BASE_DIR / "metadata"
     LOGS_DIR = BASE_DIR / "logs"
     

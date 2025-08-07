@@ -4,13 +4,11 @@ Coordenador principal do sistema de processamento de alertas de câmeras
 import asyncio
 import logging
 from datetime import datetime
-from typing import Dict, List, Any, Optional
-from sqlalchemy.orm import Session
-
-from .event_system import EventBus, EventType
+from typing import Dict, Any
+from .event_system import  EventType
 from .camera_processor import CameraProcessor, CameraConfig, CameraProcessorFactory
 from .handlers import (
-    MQTTHandler, AMQPHandler, DatabaseHandler, FrigateHandler, NewVideoHandler
+    MQTTHandler, AMQPHandler, DatabaseHandler, FrigateHandler, NewVideoHandler, DetectionHandler
 )
 from models import Camera, AlertType, SessionLocal
 from .event_system import event_bus
@@ -244,6 +242,12 @@ class CameraAlertProcessor:
             logger.info("✅ NewVideoHandler inicializado")
             await event_bus.subscribe(EventType.NEW_VIDEO_FILE, videoHandler.handle_event)
             logger.info("🔗 NewVideoHandler registrado no EventBus")
+
+            detectionHandler = DetectionHandler()
+            await detectionHandler.initialize()
+            logger.info("✅ DetectionHandler inicializado")
+            await event_bus.subscribe(EventType.TRIGGER_DETECTION, detectionHandler.handle_event)
+            logger.info("🔗 DetectionHandler registrado no EventBus")
             
             
         except Exception as e:

@@ -22,6 +22,7 @@ class EventType(Enum):
     CAMERA_PROCESSING_STOPPED = "camera_processing_stopped"
     CAMERA_STATUS_CHANGED = "camera_status_changed"
     NEW_VIDEO_FILE = "new_video_file"
+    TRIGGER_DETECTION = "trigger_detection"
 
 @dataclass
 class AlertEvent:

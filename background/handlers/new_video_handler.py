@@ -32,7 +32,7 @@ class NewVideoHandler:
     
     async def cleanup(self):
         """Limpa recursos do handler"""
-        logger.info("Database Handler finalizado")
+        logger.info("Video Handler finalizado")
     
     async def handle_event(self, event: NewVideoFileEvent) -> bool:
         """Processa evento de novo arquivo de vídeo"""

@@ -13,6 +13,7 @@ from .amqp_handler import AMQPHandler
 from .database_handler import DatabaseHandler
 from .frigate_handler import FrigateHandler
 from .new_video_handler import NewVideoHandler
+from .detection_handler import DetectionHandler
 
 __all__ = [
     "MQTTHandler",
@@ -20,4 +21,5 @@ __all__ = [
     "DatabaseHandler",
     "FrigateHandler",
     "NewVideoHandler",
+    "DetectionHandler"
 ] 
