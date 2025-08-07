@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Dict, List, Callable, Any, Optional
 from dataclasses import dataclass
 from enum import Enum
+from models import Camera
 import uuid
 
 # Configurar logging
@@ -56,9 +57,20 @@ class NewVideoFileEvent:
     """Estrutura de dados para eventos de novo arquivo de vídeo"""
     event_id: str
     event_type: EventType
+    camera: Camera
     file_path: str
     timestamp: datetime
     metadata: Dict[str, Any]
+
+@dataclass
+class TriggerDetectionEvent:
+    """Estrutura de dados para eventos de detecção acionada"""
+    event_id: str
+    event_type: EventType
+    file_path: str
+    timestamp: datetime
+    metadata: Dict[str, Any]
+    camera: Camera
 
 class EventBus:
     """
@@ -90,7 +102,7 @@ class EventBus:
                 except ValueError:
                     logger.warning(f"Handler {handler.__name__} não encontrado para evento {event_type.value}")
     
-    async def publish(self, event: AlertEvent | CameraStatusEvent | NewVideoFileEvent):
+    async def publish(self, event: AlertEvent | CameraStatusEvent | NewVideoFileEvent | TriggerDetectionEvent):
         """Publica um evento para todos os subscribers"""
         event_type = event.event_type
         
@@ -124,7 +136,7 @@ class EventBus:
                 else:
                     logger.debug(f"Handler {handler_name} executado com sucesso")
     
-    async def _safe_call_handler(self, handler: Callable, event: AlertEvent | CameraStatusEvent | NewVideoFileEvent):
+    async def _safe_call_handler(self, handler: Callable, event: AlertEvent | CameraStatusEvent | NewVideoFileEvent | TriggerDetectionEvent):
         """Executa handler com tratamento de erro"""
         try:
             if asyncio.iscoroutinefunction(handler):
@@ -137,7 +149,7 @@ class EventBus:
             logger.error(f"Erro no handler {handler.__name__}: {e}")
             raise
     
-    async def _add_to_history(self, event: AlertEvent | CameraStatusEvent | NewVideoFileEvent):
+    async def _add_to_history(self, event: AlertEvent | CameraStatusEvent | NewVideoFileEvent | TriggerDetectionEvent):
         """Adiciona evento ao histórico"""
         async with self._lock:
             event_dict = {
@@ -222,5 +234,17 @@ def create_new_video_file_event(
         event_type=EventType.NEW_VIDEO_FILE,
         file_path=file_path,
         timestamp=datetime.utcnow(),
-        metadata=metadata
+        metadata=metadata,
+        camera=None  # Será preenchido no handler de vídeo
+    )
+
+def create_trigger_detection_event(video_event: NewVideoFileEvent) -> TriggerDetectionEvent:
+    """Factory function para criar eventos de detecção acionada"""
+    return TriggerDetectionEvent(
+        event_id=str(uuid.uuid4()),
+        event_type=EventType.TRIGGER_DETECTION,
+        file_path=video_event.file_path,
+        timestamp=video_event.timestamp,
+        metadata=video_event.metadata,
+        camera=video_event.camera
     )

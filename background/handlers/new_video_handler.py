@@ -5,8 +5,9 @@ from typing import Dict, Optional
 
 import mediapipe as mp
 import cv2
-from ..event_system import NewVideoFileEvent
+from ..event_system import NewVideoFileEvent, create_trigger_detection_event, event_bus
 from config import app_config
+from models import Camera, SessionLocal
 
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,15 @@ class NewVideoHandler:
         """Processa evento de novo arquivo de vídeo"""
         try:
             logger.info(f"Novo arquivo de vídeo recebido: {event.file_path} às {event.timestamp}")
+            # verificar se existe camera ativa cadastrada com esse nome
+            db = SessionLocal()
+            camera_name = event.file_path.split("/")[-2] if "/" in event.file_path else "unknown_camera"
+            existent_camera = db.query(Camera).filter(Camera.name == camera_name, Camera.is_active == True).first()
+            if not existent_camera:
+                logger.info(f"Câmera {camera_name} não encontrada no banco de dados. Evento ignorado.")
+                return False
+            logger.info(f"Câmera {existent_camera.name} encontrada no banco de dados. Processando vídeo...")
+            event.camera = existent_camera
 
             # TODO: Verificar se já foi processado
             start_time = time.time()
@@ -71,13 +81,16 @@ class NewVideoHandler:
             processing_time = time.time() - start_time
             logger.info(f"Processamento concluído: {len(detections)} detecções em {processing_time:.2f}s")
             
-            if detections:
+            #dispara evento se houver detecções em 10% dos frames
+            if len(detections) / frame_count >= 0.1:
                 event.metadata['detections'] = detections
-                # TODO: publish detections to event bus
+                logger.info(f"Disparando evento de detecção para {event.file_path} com {len(detections)} detecções")
+                trigger_event = create_trigger_detection_event(event)
+                await event_bus.publish(trigger_event)
             return True
         
         except Exception as e:
-            self.logger.error(f"Erro ao processar vídeo {event.file_path}: {e}")
+            logger.error(f"Erro ao processar vídeo {event.file_path}: {e}")
             return False
         
         
@@ -119,5 +132,5 @@ class NewVideoHandler:
             return None
             
         except Exception as e:
-            self.logger.error(f"Erro ao detectar pessoa no frame: {e}")
+            logger.error(f"Erro ao detectar pessoa no frame: {e}")
             return None

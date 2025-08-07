@@ -32,7 +32,6 @@ async def process_new_video(video_path: str):
             file_path=video_path,
             metadata=metadata
         )
-        # Publicar evento
         await event_bus.publish(event)
 
     except Exception as e:
