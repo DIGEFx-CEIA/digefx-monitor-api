@@ -6,14 +6,11 @@ Sistema híbrido com auto-startup e controle opcional via API
 
 from .background_manager import background_manager
 from .event_system import EventBus, AlertEvent
-from .camera_alert_processor import CameraAlertProcessor
-from .camera_processor import CameraProcessor, CameraConfig
+from .event_handler_manager import EventHandlerManager
 
 __all__ = [
     "background_manager",
     "EventBus", 
     "AlertEvent",
-    "CameraAlertProcessor",
-    "CameraProcessor",
-    "CameraConfig"
+    "EventHandlerManager"
 ] 

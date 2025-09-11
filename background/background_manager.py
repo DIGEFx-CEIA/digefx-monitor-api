@@ -4,7 +4,7 @@ Background Manager - Gerenciamento global do sistema de background
 
 import logging
 from typing import Optional
-from .camera_alert_processor import CameraAlertProcessor
+from .event_handler_manager import EventHandlerManager
 from .event_system import EventBus
 from config import app_config
 from .host_monitor import start_host_monitoring
@@ -66,7 +66,7 @@ class BackgroundManager:
     """Gerenciador global do sistema de background"""
     
     def __init__(self):
-        self.processor: Optional[CameraAlertProcessor] = None
+        self.handler_manager: Optional[EventHandlerManager] = None
         self._is_running = False
         self._startup_completed = False
         self._monitors_started = False
@@ -97,13 +97,13 @@ class BackgroundManager:
         try:
             logger.info("🔄 Inicializando sistemas de background...")
             
-            # 1. Criar e inicializar o processador de alertas
-            self.processor = CameraAlertProcessor()
-            await self.processor.initialize()
-            logger.info("✅ CameraAlertProcessor inicializado")
+            # 1. Criar e inicializar o gerenciador de handlers
+            self.handler_manager = EventHandlerManager()
+            await self.handler_manager.initialize()
+            logger.info("✅ EventHandlerManager inicializado")
             
-            # 2. Iniciar processamento de alertas em background
-            # asyncio.create_task(self._start_alert_processing())
+            # 2. Sistema simplificado - handlers já inicializados e registrados no EventBus
+            # Não precisa de processamento adicional - tudo é baseado em eventos
             
             # 3. Marcar como inicializado
             self._startup_completed = True
@@ -191,11 +191,10 @@ class BackgroundManager:
                 except asyncio.CancelledError:
                     logger.info("Task de inicialização cancelada")
             
-            # Parar processamento de alertas
-            if self.processor and self._is_running:
-                await self.processor.stop_processing()
-                self._is_running = False
-                logger.info("✅ Alert Processor finalizado")
+            # Finalizar EventHandlerManager
+            if self.handler_manager:
+                await self.handler_manager.cleanup()
+                logger.info("✅ EventHandlerManager finalizado")
             
             # Nota: Os monitores básicos continuam rodando (threads daemon)
             # Eles serão finalizados automaticamente quando a aplicação parar
@@ -213,17 +212,14 @@ class BackgroundManager:
     
     async def start(self):
         """Iniciar manualmente o sistema"""
-        if not self._is_running and self.processor:
-            await self.processor.start_processing()
-            self._is_running = True
-            logger.info("▶️ Background processing iniciado manualmente")
+        logger.info("▶️ Sistema baseado em eventos - sempre ativo após inicialização")
+        # Sistema simplificado não precisa start/stop manual
+        # Os handlers ficam sempre ativos escutando eventos
     
     async def stop(self):
         """Parar manualmente o sistema"""
-        if self._is_running and self.processor:
-            await self.processor.stop_processing()
-            self._is_running = False
-            logger.info("⏹️ Background processing parado manualmente")
+        logger.info("⏹️ Sistema baseado em eventos - use shutdown() para finalizar completamente")
+        # Sistema simplificado não precisa start/stop manual
     
     def get_status(self) -> dict:
         """Status atual do sistema"""
@@ -240,26 +236,19 @@ class BackgroundManager:
                 "message": "Sistema inicializando em background..." if initialization_status == "initializing" else "Sistema iniciando..."
             }
         
-        if not self.processor:
+        if not self.handler_manager:
             return {
                 "status": "error",
-                "message": "Processor não inicializado"
+                "message": "EventHandlerManager não inicializado"
             }
         
         try:
-            # Status do processamento de alertas
-            stats = self.processor.get_stats() if self.processor else {}
-            
-            # Determinar status do processamento de alertas
-            alert_processing_status = "running" if self._is_running else "starting"
-            if not self._is_running and self._startup_completed:
-                # Se startup completou mas não está rodando, pode estar iniciando ainda
-                alert_processing_status = "initializing"
+            # Status do gerenciador de handlers
+            handler_stats = self.handler_manager.get_stats() if self.handler_manager else {}
             
             # Status geral do sistema
             system_status = {
                 "status": "running",  # Background Manager está sempre running após startup
-                "is_running": self._is_running,
                 "startup_completed": self._startup_completed,
                 "basic_monitors": {
                     "host_monitor": self._monitors_started,
@@ -267,9 +256,9 @@ class BackgroundManager:
                     "camera_monitor": self._monitors_started,
                     "status": "running" if self._monitors_started else "stopped"
                 },
-                "alert_processing": {
-                    "status": alert_processing_status,
-                    **stats
+                "event_handlers": {
+                    "status": "running" if handler_stats.get("is_initialized") else "stopped",
+                    **handler_stats
                 }
             }
             
@@ -287,7 +276,7 @@ class BackgroundManager:
     
     @property
     def is_ready(self) -> bool:
-        return self._startup_completed and self.processor is not None
+        return self._startup_completed and self.handler_manager is not None and self.handler_manager.is_ready()
     
     @property
     def monitors_running(self) -> bool:
