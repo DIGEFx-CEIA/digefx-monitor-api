@@ -69,7 +69,7 @@ class NewVideoHandler:
                 timestamp = frame_count / fps
                 
                 # Detectar pessoa no frame
-                detection = self.detect_person_in_frame(frame, timestamp)
+                detection = self.detect_person_in_frame(frame, timestamp, frame_count=frame_count)
                 
                 if detection:
                     detections.append(detection)
@@ -84,9 +84,11 @@ class NewVideoHandler:
             #dispara evento se houver detecções em 10% dos frames
             if len(detections) / frame_count >= 0.1:
                 event.metadata['detections'] = detections
-                logger.info(f"Disparando evento de detecção para {event.file_path} com {len(detections)} detecções")
+                logger.info(f"🔍 Disparando evento de detecção para {event.file_path} com {len(detections)} detecções")
                 trigger_event = create_trigger_detection_event(event)
                 await event_bus.publish(trigger_event)
+            else:
+                logger.info(f"🔍 Nenhuma detecção significativa de pessoa em {event.file_path}. Evento não disparado.")
             return True
         
         except Exception as e:
@@ -94,7 +96,7 @@ class NewVideoHandler:
             return False
         
         
-    def detect_person_in_frame(self, frame, timestamp: float) -> Optional[Dict]:
+    def detect_person_in_frame(self, frame, timestamp: float, frame_count: int) -> Optional[Dict]:
         """Detecta pessoa em um frame usando MediaPipe"""
         try:
             # Converter BGR para RGB (MediaPipe usa RGB)
@@ -119,6 +121,7 @@ class NewVideoHandler:
                 
                 return {
                     "timestamp": timestamp,
+                    "frame_count": frame_count,
                     "confidence": confidence,
                     "bounding_box": {
                         "min_x": min_x,

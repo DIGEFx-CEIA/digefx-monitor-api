@@ -15,14 +15,19 @@ class AppConfig:
 
     # Diretórios
     BASE_DIR = Path(__file__).parent.absolute()
-    VIDEO_DIR = Path("/home/digefx/Documents/digefx_monitor/frigate/storage/recordings/2025-08-07")  # No Docker será mapeado via volume
+    VIDEO_DIR = Path(os.getenv("VIDEO_DIR", "/home/digefx/Documents/digefx_monitor/frigate/storage/recordings"))  # No Docker será mapeado via volume
     METADATA_DIR = BASE_DIR / "metadata"
     LOGS_DIR = BASE_DIR / "logs"
     
     # Configurações de detecção
     MEDIAPIPE_CONFIDENCE = float(os.getenv("MEDIAPIPE_CONFIDENCE", 0.5))
     YOLO_CONFIDENCE = float(os.getenv("YOLO_CONFIDENCE", 0.6))
-    YOLO_MODEL = os.getenv("YOLO_MODEL", "yolov8n.pt")
+    YOLO_MODEL = os.getenv("YOLO_MODEL", "models/V11n-ND-V2.pt")
+    
+    # Configurações de processamento paralelo
+    DETECTION_MAX_WORKERS = int(os.getenv("DETECTION_MAX_WORKERS", "4"))
+    ALERT_COOLDOWN_HOURS = int(os.getenv("ALERT_COOLDOWN_HOURS", "1"))
+    DETECTION_THRESHOLD_PERCENT = float(os.getenv("DETECTION_THRESHOLD_PERCENT", "0.1"))
     
     
     # Configurações de servidor
