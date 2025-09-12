@@ -1,6 +1,7 @@
 import logging
 import time
 import asyncio
+import threading
 from typing import Dict, List
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
@@ -23,10 +24,14 @@ class DetectionHandler:
         self.alert_cooldown_hours = app_config.ALERT_COOLDOWN_HOURS
         self.detection_threshold = app_config.DETECTION_THRESHOLD_PERCENT
         
+        # Cache de modelos por thread (thread-safe)
+        self._thread_models = {}
+        self._model_lock = threading.Lock()
+        
         try:
-            logger.info(f"Carregando modelo YOLO: {app_config.YOLO_MODEL}")
+            logger.info(f"Carregando modelo YOLO principal: {app_config.YOLO_MODEL}")
             self.model = YOLO(app_config.YOLO_MODEL)
-            logger.info("Modelo YOLO carregado com sucesso")
+            logger.info("Modelo YOLO principal carregado com sucesso")
         except Exception as e:
             logger.error(f"Erro ao carregar modelo YOLO: {e}")
             raise
@@ -35,6 +40,30 @@ class DetectionHandler:
         """Inicializa o handler de detecção"""
         self.is_initialized = True
         logger.info("Detection Handler inicializado")
+    
+    def get_thread_model(self, batch_id: int = 0) -> YOLO:
+        """Obtém modelo YOLO específico para a thread atual (thread-safe)"""
+        thread_id = threading.get_ident()
+        
+        with self._model_lock:
+            if thread_id not in self._thread_models:
+                logger.info(f"🔄 [Lote {batch_id}] Carregando modelo YOLO para thread {thread_id}")
+                start_time = time.time()
+                
+                # Criar novo modelo para esta thread
+                model = YOLO(app_config.YOLO_MODEL)
+                
+                # Pré-aquecer o modelo com frame dummy
+                import numpy as np
+                dummy_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+                _ = model(dummy_frame, conf=0.5, verbose=False)  # Aquecimento
+                
+                load_time = time.time() - start_time
+                logger.info(f"✅ [Lote {batch_id}] Modelo YOLO carregado e aquecido para thread {thread_id} em {load_time:.2f}s")
+                
+                self._thread_models[thread_id] = model
+            
+            return self._thread_models[thread_id]
 
     async def cleanup(self):
         """Limpa recursos do handler"""
@@ -73,7 +102,7 @@ class DetectionHandler:
             # Obter detecções do MediaPipe do evento
             mediapipe_detections = event.metadata.get('detections', [])
             if not mediapipe_detections:
-                logger.warning("Nenhuma detecção do MediaPipe encontrada no evento")
+                logger.warning(f"Nenhuma detecção do MediaPipe encontrada no evento. Metadata disponível: {list(event.metadata.keys())}")
                 return {}
             
             # Extrair timestamps onde MediaPipe detectou pessoa
@@ -104,9 +133,15 @@ class DetectionHandler:
             batch_size = max(1, len(frame_indices) // self.max_workers)
             batches = [frame_indices[i:i + batch_size] for i in range(0, len(frame_indices), batch_size)]
             
+            logger.info(f"📦 Dividindo em {len(batches)} lotes (batch_size={batch_size}, max_workers={self.max_workers})")
+            for i, batch in enumerate(batches):
+                logger.info(f"  Lote {i+1}: frames {batch[0]}-{batch[-1]} ({len(batch)} frames)")
+            
             # Executar processamento paralelo
             loop = asyncio.get_event_loop()
             with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                logger.info(f"🚀 Iniciando {len(batches)} workers paralelos...")
+                
                 futures = [
                     loop.run_in_executor(
                         executor, 
@@ -114,13 +149,19 @@ class DetectionHandler:
                         event.file_path, 
                         batch, 
                         fps,
-                        event.camera.enabled_alerts
+                        event.camera.enabled_alerts,
+                        i+1  # batch_id para logs
                     ) 
-                    for batch in batches
+                    for i, batch in enumerate(batches)
                 ]
                 
-                # Aguardar todos os lotes terminarem
-                batch_results = await asyncio.gather(*futures)
+                logger.info("⏳ Aguardando conclusão dos lotes...")
+                # Aguardar todos os lotes terminarem com progress
+                batch_results = []
+                for i, future in enumerate(asyncio.as_completed(futures)):
+                    result = await future
+                    batch_results.append(result)
+                    logger.info(f"✅ Lote {i+1}/{len(futures)} concluído: {result['frames_processed']} frames processados")
             
             # Consolidar resultados
             alert_counts = {}
@@ -148,51 +189,76 @@ class DetectionHandler:
             logger.error(f"Erro ao processar vídeo paralelo {event.file_path}: {e}")
             return {}
     
-    def process_frame_batch(self, video_path: str, frame_indices: List[int], fps: float, enabled_alerts: List[str]) -> Dict:
+    def process_frame_batch(self, video_path: str, frame_indices: List[int], fps: float, enabled_alerts: List[str], batch_id: int = 0) -> Dict:
         """Processa um lote de frames de forma síncrona (executado em thread separada)"""
         try:
+            logger.info(f"🔄 [Lote {batch_id}] Iniciando processamento de {len(frame_indices)} frames")
+            
+            # Obter modelo YOLO específico para esta thread (com pré-aquecimento)
+            thread_model = self.get_thread_model(batch_id)
+            
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened():
-                logger.error(f"Erro ao abrir vídeo para processamento de lote: {video_path}")
+                logger.error(f"❌ [Lote {batch_id}] Erro ao abrir vídeo: {video_path}")
                 return {"frames_processed": 0, "alert_counts": {}}
             
             alert_counts = {}
             frames_processed = 0
             monitored_classes = set(enabled_alerts)
             
-            for frame_idx in frame_indices:
+            logger.info(f"🎯 [Lote {batch_id}] Alertas monitorados: {monitored_classes}")
+            
+            # Log de progresso a cada 10% dos frames
+            progress_interval = max(1, len(frame_indices) // 10)
+            
+            for i, frame_idx in enumerate(frame_indices):
                 # Ir para o frame específico
                 cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
                 ret, frame = cap.read()
                 
                 if not ret or frame is None:
+                    logger.debug(f"⚠️ [Lote {batch_id}] Frame {frame_idx} não pôde ser lido")
                     continue
+                
+                # Log de progresso
+                if i % progress_interval == 0 or i == len(frame_indices) - 1:
+                    progress = (i + 1) / len(frame_indices) * 100
+                    logger.info(f"📊 [Lote {batch_id}] Progresso: {progress:.1f}% ({i+1}/{len(frame_indices)} frames)")
                 
                 timestamp = frame_idx / fps
                 
-                # Executar YOLO no frame
-                detections = self.detect_objects_in_frame(frame, timestamp)
+                # Executar YOLO no frame usando modelo da thread
+                detections = self.detect_objects_in_frame(frame, timestamp, thread_model)
+                
+                logger.debug(f"🔍 [Lote {batch_id}] Frame {frame_idx}: {len(detections)} detecções")
                 
                 # Processar detecções seguindo a lógica do camera_processor
                 detected_classes = set()
                 for detection in detections:
                     class_name = detection.get("class_name", "")
-                    # Usar diretamente as classes do modelo (já em português)
-                    if class_name in monitored_classes:
-                        detected_classes.add(class_name)
+                    # Adicionar todas as classes detectadas pelo YOLO (não filtrar por monitored_classes)
+                    detected_classes.add(class_name)
                 
                 # Aplicar regras de negócio similar ao _yolo_inference_loop
                 # Modelo retorna classes em MAIÚSCULAS: PESSOA, COM_CAPACETE, COM_LUVA, etc.
                 # Banco tem códigos em inglês: NO_HELMET, SMOKING, etc.
                 
                 if "PESSOA" in detected_classes:
-                    # Se detectou pessoa mas não detectou capacete → NO_HELMET
-                    if "COM_CAPACETE" not in detected_classes:
-                        alert_counts["NO_HELMET"] = alert_counts.get("NO_HELMET", 0) + 1
+                    logger.debug(f"👤 [Lote {batch_id}] Frame {frame_idx}: PESSOA detectada, classes: {detected_classes}")
                     
-                    # Se detectou pessoa mas não detectou luva → NO_GLOVES  
-                    if "COM_LUVA" not in detected_classes:
+                    # Se detectou pessoa mas não detectou capacete → NO_HELMET (apenas se habilitado)
+                    if "COM_CAPACETE" not in detected_classes and "NO_HELMET" in monitored_classes:
+                        alert_counts["NO_HELMET"] = alert_counts.get("NO_HELMET", 0) + 1
+                        logger.debug(f"🪖 [Lote {batch_id}] Frame {frame_idx}: NO_HELMET detectado (sem capacete)")
+                    elif "COM_CAPACETE" in detected_classes:
+                        logger.debug(f"✅ [Lote {batch_id}] Frame {frame_idx}: COM_CAPACETE detectado")
+                    
+                    # Se detectou pessoa mas não detectou luva → NO_GLOVES (apenas se habilitado)
+                    if "COM_LUVA" not in detected_classes and "NO_GLOVES" in monitored_classes:
                         alert_counts["NO_GLOVES"] = alert_counts.get("NO_GLOVES", 0) + 1
+                        logger.debug(f"🧤 [Lote {batch_id}] Frame {frame_idx}: NO_GLOVES detectado (sem luva)")
+                    elif "COM_LUVA" in detected_classes:
+                        logger.debug(f"✅ [Lote {batch_id}] Frame {frame_idx}: COM_LUVA detectado")
                 
                 # Adversidades diretas - mapear classes do modelo para códigos do banco
                 class_to_alert_mapping = {
@@ -202,12 +268,14 @@ class DetectionHandler:
                 }
                 
                 for model_class, alert_code in class_to_alert_mapping.items():
-                    if model_class in detected_classes:
+                    if model_class in detected_classes and alert_code in monitored_classes:
                         alert_counts[alert_code] = alert_counts.get(alert_code, 0) + 1
                 
                 frames_processed += 1
             
             cap.release()
+            
+            logger.info(f"✅ [Lote {batch_id}] Concluído: {frames_processed} frames, alertas: {alert_counts}")
             return {"frames_processed": frames_processed, "alert_counts": alert_counts}
             
         except Exception as e:
@@ -314,11 +382,14 @@ class DetectionHandler:
         except Exception as e:
             logger.error(f"Erro ao criar e publicar alerta: {e}")
         
-    def detect_objects_in_frame(self, frame, timestamp: float) -> List[Dict]:
+    def detect_objects_in_frame(self, frame, timestamp: float, model: YOLO = None) -> List[Dict]:
         """Detecta objetos em um frame usando YOLO"""
         try:
+            # Usar modelo fornecido ou modelo principal
+            yolo_model = model if model is not None else self.model
+            
             # Fazer detecção
-            results = self.model(frame, conf=app_config.YOLO_CONFIDENCE, verbose=False)
+            results = yolo_model(frame, conf=app_config.YOLO_CONFIDENCE, verbose=False)
             
             detections = []
             
@@ -329,7 +400,7 @@ class DetectionHandler:
                         # Obter informações da detecção
                         class_id = int(box.cls.cpu().numpy())
                         confidence = float(box.conf.cpu().numpy())
-                        class_name = self.model.names[class_id]
+                        class_name = yolo_model.names[class_id]
                         
                         # Coordenadas da bounding box
                         x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
