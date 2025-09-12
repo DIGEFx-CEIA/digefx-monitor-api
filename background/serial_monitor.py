@@ -6,7 +6,7 @@ import threading
 import time
 from datetime import datetime
 
-from config.settings import SERIAL_PORT, BAUD_RATE
+from config import app_config
 from models import DeviceStatus, DeviceLocation, SessionLocal
 
 # Serial communication lock
@@ -16,7 +16,7 @@ serial_lock = threading.Lock()
 def initialize_serial():
     """Inicializa a porta serial"""
     try:
-        return serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
+        return serial.Serial(app_config.SERIAL_PORT, app_config.BAUD_RATE, timeout=1)
     except serial.SerialException as e:
         print(f"Error initializing serial: {e}")
         return None

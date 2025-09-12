@@ -159,7 +159,7 @@ class BackgroundManager:
         self.observer.schedule(event_handler, str(app_config.VIDEO_DIR), recursive=True)
         # Iniciar monitoramento
         self.observer.start()
-        logger.info("Monitoramento iniciado. Aguardando novos arquivos...")
+        logger.info(f"Monitoramento iniciado na pasta {app_config.VIDEO_DIR}. Aguardando novos arquivos...")
     
     async def _start_alert_processing(self):
         """Inicia o processamento de alertas em background"""

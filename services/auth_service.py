@@ -4,10 +4,11 @@ Serviços de autenticação e autorização
 from datetime import datetime, timedelta
 from jose import JWTError, jwt
 from fastapi import HTTPException, Depends
+from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
-from config.settings import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
-from config.security import pwd_context, oauth2_scheme
+from config import app_config
+from config.security import pwd_context, security
 from models import User, SessionLocal
 
 
@@ -31,12 +32,12 @@ def authenticate_user(db, username: str, password: str):
 def create_access_token(data: dict, expires_delta: timedelta = None):
     """Cria um token de acesso JWT"""
     to_encode = data.copy()
-    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=app_config.ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode.update({"exp": expire})
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return jwt.encode(to_encode, app_config.SECRET_KEY, algorithm=app_config.ALGORITHM)
 
 
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)):
     """Dependency para obter o usuário atual a partir do token"""
     credentials_exception = HTTPException(
         status_code=401,
@@ -44,7 +45,7 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(credentials.credentials, app_config.SECRET_KEY, algorithms=[app_config.ALGORITHM])
         username: str = payload.get("name")
         if username is None:
             raise credentials_exception

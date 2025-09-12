@@ -4,6 +4,10 @@ Configurações da aplicação
 import os
 from pathlib import Path
 from typing import Optional
+from dotenv import load_dotenv
+
+# Carregar variáveis de ambiente do arquivo .env
+load_dotenv()
 
 class AppConfig:
     """Configurações da aplicação"""
@@ -39,12 +43,19 @@ class AppConfig:
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./data/app.db")
     
     # Configurações de segurança
-    SECRET_KEY: str = os.getenv("SECRET_KEY", "your-secret-key-here")
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "digefxsecretkey")  # Usando valor do settings.py
+    ALGORITHM: str = "HS256"  # Adicionado do settings.py
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+    
+    # Configurações MQTT
+    MQTT_BROKER: str = os.getenv("MQTT_BROKER", "localhost")
+    MQTT_PORT: int = int(os.getenv("MQTT_PORT", "1883"))
+    MQTT_TOPIC: str = os.getenv("MQTT_TOPIC", "device/status")
     
     # Configurações de serial
     SERIAL_PORT: str = os.getenv("SERIAL_PORT", "/dev/ttyUSB0")
-    SERIAL_BAUDRATE: int = int(os.getenv("SERIAL_BAUDRATE", "9600"))
+    SERIAL_BAUDRATE: int = int(os.getenv("SERIAL_BAUDRATE", "115200"))  # Corrigido para 115200
+    BAUD_RATE: int = SERIAL_BAUDRATE  # Alias para compatibilidade
     SERIAL_TIMEOUT: int = int(os.getenv("SERIAL_TIMEOUT", "1"))
     
     # Configurações de monitoramento

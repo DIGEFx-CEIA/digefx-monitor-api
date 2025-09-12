@@ -14,7 +14,7 @@ from config.database_config import get_database
 from services.network_service import get_public_ip
 from models import DeviceStatus, HostStatus, DeviceLocation, User
 from schemas import StatusResponse, DeviceStatusResponse, HostStatusResponse, LocationListResponse, DeviceLocationResponse
-from config.settings import SERIAL_PORT, BAUD_RATE
+from config import app_config
 import socket
 import psutil
 
@@ -34,7 +34,7 @@ class SerialConfig(BaseModel):
 def initialize_serial():
     """Inicializa a porta serial"""
     try:
-        return serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
+        return serial.Serial(app_config.SERIAL_PORT, app_config.BAUD_RATE, timeout=1)
     except serial.SerialException as e:
         print(f"Error initializing serial: {e}")
         return None
