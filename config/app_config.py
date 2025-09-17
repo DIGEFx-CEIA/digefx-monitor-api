@@ -29,7 +29,7 @@ class AppConfig:
     YOLO_MODEL = os.getenv("YOLO_MODEL", "models/V11n-ND-V2.pt")
     
     # Configurações de processamento paralelo
-    DETECTION_MAX_WORKERS = int(os.getenv("DETECTION_MAX_WORKERS", "4"))
+    DETECTION_MAX_WORKERS = int(os.getenv("DETECTION_MAX_WORKERS", "16"))
     ALERT_COOLDOWN_HOURS = int(os.getenv("ALERT_COOLDOWN_HOURS", "1"))
     DETECTION_THRESHOLD_PERCENT = float(os.getenv("DETECTION_THRESHOLD_PERCENT", "0.1"))
     

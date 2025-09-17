@@ -24,9 +24,10 @@ class DetectionHandler:
         self.alert_cooldown_hours = app_config.ALERT_COOLDOWN_HOURS
         self.detection_threshold = app_config.DETECTION_THRESHOLD_PERCENT
         
-        # Cache de modelos por thread (thread-safe)
-        self._thread_models = {}
+        # Pool de modelos reutilizáveis (thread-safe)
+        self._model_pool = []
         self._model_lock = threading.Lock()
+        self._models_in_use = set()
         
         try:
             logger.info(f"Carregando modelo YOLO principal: {app_config.YOLO_MODEL}")
@@ -37,37 +38,105 @@ class DetectionHandler:
             raise
 
     async def initialize(self):
-        """Inicializa o handler de detecção"""
+        """Inicializa o handler de detecção com pré-carregamento de modelos"""
+        if self.is_initialized:
+            return
+            
+        logger.info("🚀 Inicializando Detection Handler com pré-carregamento...")
+        
+        # Pré-carregar e aquecer modelos para todas as threads
+        await self._preload_thread_models()
+        
         self.is_initialized = True
-        logger.info("Detection Handler inicializado")
+        logger.info("✅ Detection Handler inicializado com modelos pré-carregados")
+    
+    async def _preload_thread_models(self):
+        """Pré-carrega e aquece modelos YOLO para todas as threads trabalhadoras"""
+        try:
+            logger.info(f"🔥 Pré-carregando {self.max_workers} modelos YOLO...")
+            start_time = time.time()
+            
+            # Usar ThreadPoolExecutor para carregar modelos em paralelo
+            loop = asyncio.get_event_loop()
+            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                # Criar tasks para carregar um modelo por worker
+                futures = [
+                    loop.run_in_executor(executor, self._load_and_warm_model, i+1)
+                    for i in range(self.max_workers)
+                ]
+                
+                # Aguardar todos os modelos serem carregados
+                thread_ids = await asyncio.gather(*futures)
+                
+            total_time = time.time() - start_time
+            logger.info(f"✅ {len(thread_ids)} modelos pré-carregados e aquecidos em {total_time:.2f}s")
+            logger.info(f"🎯 Thread IDs com modelos: {thread_ids}")
+            
+        except Exception as e:
+            logger.error(f"❌ Erro no pré-carregamento: {e}")
+            # Continuar mesmo com erro - modelos serão carregados sob demanda
+    
+    def _load_and_warm_model(self, worker_id: int) -> int:
+        """Carrega e aquece um modelo YOLO para o pool de modelos"""
+        try:
+            logger.info(f"🔄 Worker {worker_id}: Carregando modelo para pool")
+            
+            load_start = time.time()
+            
+            # Carregar modelo
+            model = YOLO(app_config.YOLO_MODEL)
+            
+            # Aquecer modelo com frame dummy
+            dummy_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+            _ = model(dummy_frame, conf=0.5, verbose=False)
+            
+            # Adicionar ao pool thread-safe
+            with self._model_lock:
+                self._model_pool.append(model)
+            
+            load_time = time.time() - load_start
+            logger.info(f"✅ Worker {worker_id}: Modelo carregado e aquecido em {load_time:.2f}s (pool: {len(self._model_pool)})")
+            
+            return worker_id
+            
+        except Exception as e:
+            logger.error(f"❌ Worker {worker_id}: Erro ao carregar modelo - {e}")
+            return -1
     
     def get_thread_model(self, batch_id: int = 0) -> YOLO:
-        """Obtém modelo YOLO específico para a thread atual (thread-safe)"""
-        thread_id = threading.get_ident()
-        
+        """Obtém modelo YOLO do pool pré-carregado (thread-safe)"""
         with self._model_lock:
-            if thread_id not in self._thread_models:
-                logger.info(f"🔄 [Lote {batch_id}] Carregando modelo YOLO para thread {thread_id}")
-                start_time = time.time()
-                
-                # Criar novo modelo para esta thread
-                model = YOLO(app_config.YOLO_MODEL)
-                
-                # Pré-aquecer o modelo com frame dummy
-                import numpy as np
-                dummy_frame = np.zeros((480, 640, 3), dtype=np.uint8)
-                _ = model(dummy_frame, conf=0.5, verbose=False)  # Aquecimento
-                
-                load_time = time.time() - start_time
-                logger.info(f"✅ [Lote {batch_id}] Modelo YOLO carregado e aquecido para thread {thread_id} em {load_time:.2f}s")
-                
-                self._thread_models[thread_id] = model
-            
-            return self._thread_models[thread_id]
+            # Tentar obter modelo do pool
+            if self._model_pool:
+                model = self._model_pool.pop(0)  # Pegar primeiro modelo disponível
+                logger.debug(f"⚡ [Lote {batch_id}] Usando modelo do pool (restam: {len(self._model_pool)})")
+                return model
+            else:
+                # Fallback: usar modelo principal (pode causar contenção)
+                logger.warning(f"🔄 [Lote {batch_id}] Pool vazio, usando modelo principal")
+                return self.model
+    
+    def return_thread_model(self, model: YOLO, batch_id: int = 0):
+        """Retorna modelo para o pool após uso"""
+        if model != self.model:  # Não retornar modelo principal
+            with self._model_lock:
+                self._model_pool.append(model)
+                logger.debug(f"♻️ [Lote {batch_id}] Modelo retornado ao pool (total: {len(self._model_pool)})")
 
     async def cleanup(self):
-        """Limpa recursos do handler"""
-        logger.info("Detection Handler finalizado")
+        """Limpa recursos do handler incluindo modelos pré-carregados"""
+        try:
+            logger.info("🧹 Limpando recursos do Detection Handler...")
+            
+            with self._model_lock:
+                num_models = len(self._model_pool)
+                self._model_pool.clear()
+                self._models_in_use.clear()
+                logger.info(f"✅ {num_models} modelos do pool removidos da memória")
+            
+            logger.info("🧹 Detection Handler finalizado")
+        except Exception as e:
+            logger.error(f"❌ Erro na limpeza: {e}")
 
     async def handle_event(self, event: TriggerDetectionEvent) -> bool:
         """Processa evento de detecção com processamento paralelo"""
@@ -80,7 +149,7 @@ class DetectionHandler:
                 return False
                 
             logger.info(f"Alertas habilitados: {event.camera.enabled_alerts}")
-            
+
             # Processar vídeo com YOLO de forma paralela
             alert_counts = await self.process_video_parallel(event)
             
@@ -194,7 +263,7 @@ class DetectionHandler:
         try:
             logger.info(f"🔄 [Lote {batch_id}] Iniciando processamento de {len(frame_indices)} frames")
             
-            # Obter modelo YOLO específico para esta thread (com pré-aquecimento)
+            # Obter modelo YOLO do pool pré-carregado
             thread_model = self.get_thread_model(batch_id)
             
             cap = cv2.VideoCapture(video_path)
@@ -275,11 +344,19 @@ class DetectionHandler:
             
             cap.release()
             
+            # Retornar modelo ao pool
+            self.return_thread_model(thread_model, batch_id)
+            
             logger.info(f"✅ [Lote {batch_id}] Concluído: {frames_processed} frames, alertas: {alert_counts}")
             return {"frames_processed": frames_processed, "alert_counts": alert_counts}
             
         except Exception as e:
             logger.error(f"Erro ao processar lote de frames: {e}")
+            # Tentar retornar modelo mesmo em caso de erro
+            try:
+                self.return_thread_model(thread_model, batch_id)
+            except:
+                pass
             return {"frames_processed": 0, "alert_counts": {}}
     
     async def generate_alerts_from_counts(self, event: TriggerDetectionEvent, alert_counts: Dict[str, int]):
