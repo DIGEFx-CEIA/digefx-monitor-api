@@ -1,7 +1,8 @@
-from sqlalchemy import Boolean, create_engine, Column, Integer, String, Float, DateTime, JSON, ForeignKey
+from sqlalchemy import Boolean, create_engine, Column, Integer, String, Float, DateTime, JSON, ForeignKey, Enum as SQLEnum
 from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime
 from sqlalchemy.orm import sessionmaker, relationship
+import enum
 
 # Conexão com o SQLite
 DATABASE_URL = "sqlite:///./data/app.db"
@@ -10,6 +11,17 @@ engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
+
+# Enum para tipos de câmera
+class CameraType(str, enum.Enum):
+    """Tipos de câmera suportados pelo sistema"""
+    INTERNAL = "internal"  # Câmera interna
+    EXTERNAL = "external"  # Câmera externa
+    
+    @classmethod
+    def get_default(cls):
+        """Retorna o tipo padrão de câmera"""
+        return cls.INTERNAL
 
 # Modelo de Usuário
 class User(Base):
@@ -62,6 +74,7 @@ class Camera(Base):
     name = Column(String, nullable=False, unique=True)
     ip_address = Column(String, nullable=False)
     port = Column(Integer, default=80)
+    camera_type = Column(SQLEnum(CameraType, values_callable=lambda x: [e.value for e in x]), nullable=False, default=CameraType.INTERNAL)
     enabled_alerts = Column(JSON)  # List of enabled alert types
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)

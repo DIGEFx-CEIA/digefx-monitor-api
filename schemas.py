@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel
+from models import CameraType
 
 
 class DeviceStatusResponse(BaseModel):
@@ -72,12 +73,14 @@ class CameraCreate(BaseModel):
     name: str
     ip_address: str
     port: int = 80
+    camera_type: CameraType = CameraType.INTERNAL
     enabled_alerts: List[str] = []  # List of alert type codes
 
 class CameraUpdate(BaseModel):
     name: Optional[str] = None
     ip_address: Optional[str] = None
     port: Optional[int] = None
+    camera_type: Optional[CameraType] = None
     enabled_alerts: Optional[List[str]] = None
     is_active: Optional[bool] = None
 
@@ -86,6 +89,7 @@ class CameraResponse(BaseModel):
     name: str
     ip_address: str
     port: int
+    camera_type: str
     enabled_alerts: List[str]
     is_active: bool
     created_at: str
@@ -96,6 +100,7 @@ class CameraStatusResponse(BaseModel):
     camera_name: str
     camera_ip: str
     camera_port: int
+    camera_type: str
     is_connected: bool
     is_active: bool
     last_ping_time: Optional[str]

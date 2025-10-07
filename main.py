@@ -105,42 +105,6 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Middleware para verificar status do sistema (mais permissivo)
-@app.middleware("http")
-async def check_system_ready(request, call_next):
-    """Middleware que verifica se o sistema básico está pronto"""
-    # Endpoints sempre disponíveis (mesmo durante inicialização)
-    always_available = ["/", "/health", "/docs", "/openapi.json", "/redoc"]
-    
-    # Endpoints de background sempre disponíveis (para monitoramento)
-    background_endpoints = ["/background/status", "/background/health"]
-    
-    # Endpoints básicos (não dependem do background completo)
-    basic_endpoints = ["/api/v1/auth", "/api/v1/devices", "/api/v1/cameras"]
-    
-    # Permitir endpoints básicos mesmo se background não estiver 100% pronto
-    if any(request.url.path.startswith(path) for path in always_available + background_endpoints + basic_endpoints):
-        return await call_next(request)
-    
-    # Para endpoints avançados, verificar se sistema básico está pronto
-    if not _system_ready:
-        raise HTTPException(
-            status_code=503, 
-            detail="Sistema ainda inicializando. Aguarde alguns segundos e tente novamente."
-        )
-    
-    # Endpoints que dependem especificamente do background completo
-    background_dependent = ["/api/v1/alerts"]
-    
-    if any(request.url.path.startswith(path) for path in background_dependent):
-        if not _background_ready:
-            raise HTTPException(
-                status_code=503,
-                detail="Sistema de alertas ainda inicializando. Aguarde e tente novamente."
-            )
-    
-    return await call_next(request)
-
 # Configuração de segurança para Swagger
 bearer_scheme = HTTPBearer()
 

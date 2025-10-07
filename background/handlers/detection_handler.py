@@ -11,7 +11,7 @@ import numpy as np
 from ultralytics import YOLO
 from ..event_system import TriggerDetectionEvent, event_bus, create_alert_event
 from config import app_config
-from models import SessionLocal, CameraAlert
+from models import SessionLocal, CameraAlert, CameraType
 
 
 logger = logging.getLogger(__name__)
@@ -25,17 +25,34 @@ class DetectionHandler:
         self.detection_threshold = app_config.DETECTION_THRESHOLD_PERCENT
         self.skip_frames = app_config.SKIP_FRAMES
 
-        # Pool de modelos reutilizáveis (thread-safe)
-        self._model_pool = []
+        # Pool de modelos reutilizáveis por tipo de câmera (thread-safe)
+        self._model_pools: Dict[str, List[YOLO]] = {}
         self._model_lock = threading.Lock()
         self._models_in_use = set()
         
+        # Carregar modelos principais para cada tipo de câmera
+        self._main_models: Dict[str, YOLO] = {}
+        
         try:
-            logger.info(f"Carregando modelo YOLO principal: {app_config.YOLO_MODEL}")
-            self.model = YOLO(app_config.YOLO_MODEL)
-            logger.info("Modelo YOLO principal carregado com sucesso")
+            logger.info("🚀 Carregando modelos YOLO para cada tipo de câmera...")
+            for camera_type in CameraType:
+                model_path = app_config.YOLO_MODELS_BY_TYPE.get(camera_type.value)
+                if model_path:
+                    logger.info(f"  📦 Carregando modelo para tipo '{camera_type.value}': {model_path}")
+                    self._main_models[camera_type.value] = YOLO(model_path)
+                    self._model_pools[camera_type.value] = []
+                    logger.info(f"  ✅ Modelo '{camera_type.value}' carregado com sucesso")
+                else:
+                    logger.warning(f"  ⚠️  Modelo não configurado para tipo '{camera_type.value}'")
+            
+            logger.info(f"✅ Total de {len(self._main_models)} modelos carregados")
+            
+            # Manter compatibilidade com código legado
+            if CameraType.EXTERNAL.value in self._main_models:
+                self.model = self._main_models[CameraType.EXTERNAL.value]
+            
         except Exception as e:
-            logger.error(f"Erro ao carregar modelo YOLO: {e}")
+            logger.error(f"❌ Erro ao carregar modelos YOLO: {e}")
             raise
 
     async def initialize(self):
@@ -52,40 +69,63 @@ class DetectionHandler:
         logger.info("✅ Detection Handler inicializado com modelos pré-carregados")
     
     async def _preload_thread_models(self):
-        """Pré-carrega e aquece modelos YOLO para todas as threads trabalhadoras"""
+        """Pré-carrega e aquece modelos YOLO para todas as threads trabalhadoras por tipo de câmera"""
         try:
-            logger.info(f"🔥 Pré-carregando {self.max_workers} modelos YOLO...")
+            logger.info(f"🔥 Pré-carregando modelos YOLO para cada tipo de câmera...")
             start_time = time.time()
+            
+            # Calcular workers por tipo (distribuir igualmente)
+            workers_per_type = max(1, self.max_workers // len(self._main_models))
             
             # Usar ThreadPoolExecutor para carregar modelos em paralelo
             loop = asyncio.get_event_loop()
+            all_futures = []
+            
             with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                # Criar tasks para carregar um modelo por worker
-                futures = [
-                    loop.run_in_executor(executor, self._load_and_warm_model, i+1)
-                    for i in range(self.max_workers)
-                ]
+                for camera_type in self._main_models.keys():
+                    logger.info(f"  🔄 Pré-carregando {workers_per_type} modelos para tipo '{camera_type}'")
+                    # Criar tasks para carregar modelos para este tipo
+                    futures = [
+                        loop.run_in_executor(
+                            executor, 
+                            self._load_and_warm_model, 
+                            camera_type,
+                            i+1
+                        )
+                        for i in range(workers_per_type)
+                    ]
+                    all_futures.extend(futures)
                 
                 # Aguardar todos os modelos serem carregados
-                thread_ids = await asyncio.gather(*futures)
+                results = await asyncio.gather(*all_futures)
                 
             total_time = time.time() - start_time
-            logger.info(f"✅ {len(thread_ids)} modelos pré-carregados e aquecidos em {total_time:.2f}s")
-            logger.info(f"🎯 Thread IDs com modelos: {thread_ids}")
+            successful_loads = sum(1 for r in results if r != -1)
+            logger.info(f"✅ {successful_loads}/{len(results)} modelos pré-carregados e aquecidos em {total_time:.2f}s")
+            
+            # Log de estatísticas por tipo
+            for camera_type, pool in self._model_pools.items():
+                logger.info(f"  📊 Tipo '{camera_type}': {len(pool)} modelos no pool")
             
         except Exception as e:
             logger.error(f"❌ Erro no pré-carregamento: {e}")
             # Continuar mesmo com erro - modelos serão carregados sob demanda
     
-    def _load_and_warm_model(self, worker_id: int) -> int:
-        """Carrega e aquece um modelo YOLO para o pool de modelos"""
+    def _load_and_warm_model(self, camera_type: str, worker_id: int) -> int:
+        """Carrega e aquece um modelo YOLO para o pool de modelos de um tipo específico"""
         try:
-            logger.info(f"🔄 Worker {worker_id}: Carregando modelo para pool")
+            logger.info(f"🔄 Worker {worker_id} [{camera_type}]: Carregando modelo para pool")
             
             load_start = time.time()
             
+            # Obter caminho do modelo para este tipo
+            model_path = app_config.YOLO_MODELS_BY_TYPE.get(camera_type)
+            if not model_path:
+                logger.error(f"❌ Worker {worker_id} [{camera_type}]: Modelo não configurado")
+                return -1
+            
             # Carregar modelo
-            model = YOLO(app_config.YOLO_MODEL)
+            model = YOLO(model_path)
             
             # Aquecer modelo com frame dummy
             dummy_frame = np.zeros((480, 640, 3), dtype=np.uint8)
@@ -93,36 +133,43 @@ class DetectionHandler:
             
             # Adicionar ao pool thread-safe
             with self._model_lock:
-                self._model_pool.append(model)
+                self._model_pools[camera_type].append(model)
             
             load_time = time.time() - load_start
-            logger.info(f"✅ Worker {worker_id}: Modelo carregado e aquecido em {load_time:.2f}s (pool: {len(self._model_pool)})")
+            logger.info(f"✅ Worker {worker_id} [{camera_type}]: Modelo carregado e aquecido em {load_time:.2f}s (pool: {len(self._model_pools[camera_type])})")
             
             return worker_id
             
         except Exception as e:
-            logger.error(f"❌ Worker {worker_id}: Erro ao carregar modelo - {e}")
+            logger.error(f"❌ Worker {worker_id} [{camera_type}]: Erro ao carregar modelo - {e}")
             return -1
     
-    def get_thread_model(self, batch_id: int = 0) -> YOLO:
-        """Obtém modelo YOLO do pool pré-carregado (thread-safe)"""
+    def get_thread_model(self, camera_type: str, batch_id: int = 0) -> YOLO:
+        """Obtém modelo YOLO do pool pré-carregado para o tipo de câmera especificado (thread-safe)"""
         with self._model_lock:
-            # Tentar obter modelo do pool
-            if self._model_pool:
-                model = self._model_pool.pop(0)  # Pegar primeiro modelo disponível
-                logger.debug(f"⚡ [Lote {batch_id}] Usando modelo do pool (restam: {len(self._model_pool)})")
+            # Tentar obter modelo do pool para este tipo
+            if camera_type in self._model_pools and self._model_pools[camera_type]:
+                model = self._model_pools[camera_type].pop(0)
+                logger.debug(f"⚡ [Lote {batch_id}] [{camera_type}] Usando modelo do pool (restam: {len(self._model_pools[camera_type])})")
                 return model
             else:
-                # Fallback: usar modelo principal (pode causar contenção)
-                logger.warning(f"🔄 [Lote {batch_id}] Pool vazio, usando modelo principal")
-                return self.model
+                # Fallback: usar modelo principal deste tipo (pode causar contenção)
+                if camera_type in self._main_models:
+                    logger.warning(f"🔄 [Lote {batch_id}] [{camera_type}] Pool vazio, usando modelo principal")
+                    return self._main_models[camera_type]
+                else:
+                    # Se tipo não existe, usar modelo external como fallback
+                    logger.error(f"❌ [Lote {batch_id}] [{camera_type}] Tipo não configurado, usando fallback")
+                    return self._main_models.get(CameraType.EXTERNAL.value, self.model)
     
-    def return_thread_model(self, model: YOLO, batch_id: int = 0):
+    def return_thread_model(self, model: YOLO, camera_type: str, batch_id: int = 0):
         """Retorna modelo para o pool após uso"""
-        if model != self.model:  # Não retornar modelo principal
+        # Verificar se não é o modelo principal (não devolver modelo principal ao pool)
+        if camera_type in self._main_models and model != self._main_models[camera_type]:
             with self._model_lock:
-                self._model_pool.append(model)
-                logger.debug(f"♻️ [Lote {batch_id}] Modelo retornado ao pool (total: {len(self._model_pool)})")
+                if camera_type in self._model_pools:
+                    self._model_pools[camera_type].append(model)
+                    logger.debug(f"♻️ [Lote {batch_id}] [{camera_type}] Modelo retornado ao pool (total: {len(self._model_pools[camera_type])})")
 
     async def cleanup(self):
         """Limpa recursos do handler incluindo modelos pré-carregados"""
@@ -130,10 +177,17 @@ class DetectionHandler:
             logger.info("🧹 Limpando recursos do Detection Handler...")
             
             with self._model_lock:
-                num_models = len(self._model_pool)
-                self._model_pool.clear()
+                total_models = 0
+                for camera_type, pool in self._model_pools.items():
+                    num_models = len(pool)
+                    total_models += num_models
+                    pool.clear()
+                    logger.info(f"  🗑️  Tipo '{camera_type}': {num_models} modelos removidos")
+                
+                self._model_pools.clear()
+                self._main_models.clear()
                 self._models_in_use.clear()
-                logger.info(f"✅ {num_models} modelos do pool removidos da memória")
+                logger.info(f"✅ {total_models} modelos do pool removidos da memória")
             
             logger.info("🧹 Detection Handler finalizado")
         except Exception as e:
@@ -220,6 +274,7 @@ class DetectionHandler:
                         batch, 
                         fps,
                         event.camera.enabled_alerts,
+                        event.camera.camera_type.value,  # Tipo da câmera
                         i+1  # batch_id para logs
                     ) 
                     for i, batch in enumerate(batches)
@@ -259,13 +314,13 @@ class DetectionHandler:
             logger.error(f"Erro ao processar vídeo paralelo {event.file_path}: {e}")
             return {}
     
-    def process_frame_batch(self, video_path: str, frame_indices: List[int], fps: float, enabled_alerts: List[str], batch_id: int = 0) -> Dict:
+    def process_frame_batch(self, video_path: str, frame_indices: List[int], fps: float, enabled_alerts: List[str], camera_type: str, batch_id: int = 0) -> Dict:
         """Processa um lote de frames de forma síncrona (executado em thread separada)"""
         try:
-            logger.info(f"🔄 [Lote {batch_id}] Iniciando processamento de {len(frame_indices)} frames")
+            logger.info(f"🔄 [Lote {batch_id}] [{camera_type}] Iniciando processamento de {len(frame_indices)} frames")
             
-            # Obter modelo YOLO do pool pré-carregado
-            thread_model = self.get_thread_model(batch_id)
+            # Obter modelo YOLO do pool pré-carregado para o tipo de câmera
+            thread_model = self.get_thread_model(camera_type, batch_id)
             
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened():
@@ -348,16 +403,16 @@ class DetectionHandler:
             cap.release()
             
             # Retornar modelo ao pool
-            self.return_thread_model(thread_model, batch_id)
+            self.return_thread_model(thread_model, camera_type, batch_id)
             
-            logger.info(f"✅ [Lote {batch_id}] Concluído: {frames_processed} frames, alertas: {alert_counts}")
+            logger.info(f"✅ [Lote {batch_id}] [{camera_type}] Concluído: {frames_processed} frames, alertas: {alert_counts}")
             return {"frames_processed": frames_processed, "alert_counts": alert_counts}
             
         except Exception as e:
-            logger.error(f"Erro ao processar lote de frames: {e}")
+            logger.error(f"❌ [Lote {batch_id}] [{camera_type}] Erro ao processar lote de frames: {e}")
             # Tentar retornar modelo mesmo em caso de erro
             try:
-                self.return_thread_model(thread_model, batch_id)
+                self.return_thread_model(thread_model, camera_type, batch_id)
             except:
                 pass
             return {"frames_processed": 0, "alert_counts": {}}

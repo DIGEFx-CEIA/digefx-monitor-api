@@ -28,6 +28,12 @@ class AppConfig:
     YOLO_CONFIDENCE = float(os.getenv("YOLO_CONFIDENCE", 0.6))
     YOLO_MODEL = os.getenv("YOLO_MODEL", "models/V11n-ND-V2.pt")
     
+    # Configurações de modelos por tipo de câmera
+    YOLO_MODELS_BY_TYPE = {
+        "internal": os.getenv("YOLO_MODEL_INTERNAL", "models/V11-Interior.pt"),
+        "external": os.getenv("YOLO_MODEL_EXTERNAL", "models/V11n-ND-V2.pt")
+    }
+    
     # Configurações de processamento paralelo
     DETECTION_MAX_WORKERS = int(os.getenv("DETECTION_MAX_WORKERS", "16"))
     ALERT_COOLDOWN_HOURS = int(os.getenv("ALERT_COOLDOWN_HOURS", "1"))
