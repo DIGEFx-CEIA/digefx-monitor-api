@@ -23,7 +23,8 @@ class DetectionHandler:
         self.max_workers = app_config.DETECTION_MAX_WORKERS
         self.alert_cooldown_hours = app_config.ALERT_COOLDOWN_HOURS
         self.detection_threshold = app_config.DETECTION_THRESHOLD_PERCENT
-        
+        self.skip_frames = app_config.SKIP_FRAMES
+
         # Pool de modelos reutilizáveis (thread-safe)
         self._model_pool = []
         self._model_lock = threading.Lock()
@@ -281,6 +282,8 @@ class DetectionHandler:
             progress_interval = max(1, len(frame_indices) // 10)
             
             for i, frame_idx in enumerate(frame_indices):
+                if i%self.skip_frames != 0:
+                    continue
                 # Ir para o frame específico
                 cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
                 ret, frame = cap.read()
@@ -340,7 +343,7 @@ class DetectionHandler:
                     if model_class in detected_classes and alert_code in monitored_classes:
                         alert_counts[alert_code] = alert_counts.get(alert_code, 0) + 1
                 
-                frames_processed += 1
+                frames_processed += self.skip_frames
             
             cap.release()
             
@@ -374,9 +377,9 @@ class DetectionHandler:
                     continue
                 
                 # Verificar se atingiu o threshold (10% dos frames)
-                percentage = count / total_frames
+                percentage = (count / total_frames) * self.skip_frames
                 if percentage >= self.detection_threshold:
-                    logger.info(f"Alerta {alert_type}: {count}/{total_frames} frames ({percentage*100:.1f}%)")
+                    logger.info(f"Alerta {alert_type}: {count * self.skip_frames}/{total_frames} frames ({percentage*100:.1f}%)")
                     
                     # Verificar cooldown
                     if await self.should_trigger_alert(event.camera.id, alert_type):

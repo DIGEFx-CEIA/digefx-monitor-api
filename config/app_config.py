@@ -32,7 +32,7 @@ class AppConfig:
     DETECTION_MAX_WORKERS = int(os.getenv("DETECTION_MAX_WORKERS", "16"))
     ALERT_COOLDOWN_HOURS = int(os.getenv("ALERT_COOLDOWN_HOURS", "1"))
     DETECTION_THRESHOLD_PERCENT = float(os.getenv("DETECTION_THRESHOLD_PERCENT", "0.1"))
-    
+    SKIP_FRAMES = int(os.getenv("SKIP_FRAMES", 3))
     
     # Configurações de servidor
     HOST: str = "0.0.0.0"
@@ -53,7 +53,7 @@ class AppConfig:
     MQTT_TOPIC: str = os.getenv("MQTT_TOPIC", "device/status")
     
     # Configurações de serial
-    SERIAL_PORT: str = os.getenv("SERIAL_PORT", "/dev/ttyUSB0")
+    SERIAL_PORT: str = os.getenv("SERIAL_PORT", "/dev/ttyACM0")
     SERIAL_BAUDRATE: int = int(os.getenv("SERIAL_BAUDRATE", "115200"))  # Corrigido para 115200
     BAUD_RATE: int = SERIAL_BAUDRATE  # Alias para compatibilidade
     SERIAL_TIMEOUT: int = int(os.getenv("SERIAL_TIMEOUT", "1"))
