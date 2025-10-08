@@ -34,6 +34,7 @@ class SerialConfig(BaseModel):
 def initialize_serial():
     """Inicializa a porta serial"""
     try:
+        return None
         return serial.Serial(app_config.SERIAL_PORT, app_config.BAUD_RATE, timeout=1)
     except serial.SerialException as e:
         print(f"Error initializing serial: {e}")

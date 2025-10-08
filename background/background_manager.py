@@ -9,6 +9,7 @@ from .event_system import EventBus
 from config import app_config
 from .host_monitor import start_host_monitoring
 from .serial_monitor import start_serial_monitoring
+from .serial_manager import get_serial_manager, shutdown_serial_manager
 from .camera_monitor import start_camera_monitoring
 from .file_processor import process_new_video
 from watchdog.observers import Observer
@@ -196,7 +197,14 @@ class BackgroundManager:
                 await self.handler_manager.cleanup()
                 logger.info("✅ EventHandlerManager finalizado")
             
-            # Nota: Os monitores básicos continuam rodando (threads daemon)
+            # Finalizar SerialManager
+            try:
+                shutdown_serial_manager()
+                logger.info("✅ SerialManager finalizado")
+            except Exception as e:
+                logger.error(f"⚠️ Erro ao finalizar SerialManager: {e}")
+            
+            # Nota: Os outros monitores básicos continuam rodando (threads daemon)
             # Eles serão finalizados automaticamente quando a aplicação parar
             
             logger.info("✅ Background Manager finalizado!")

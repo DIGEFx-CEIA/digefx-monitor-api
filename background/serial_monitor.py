@@ -1,93 +1,139 @@
 """
 Monitor de comunicação serial em background
+Refatorado para usar SerialManager centralizado
 """
-import serial
-import threading
-import time
+import logging
 from datetime import datetime
 
-from config import app_config
 from models import DeviceStatus, DeviceLocation, SessionLocal
+from .serial_manager import get_serial_manager, MessageType
 
-# Serial communication lock
-serial_lock = threading.Lock()
+logger = logging.getLogger(__name__)
 
+# === Funções de compatibilidade para código legado ===
 
-def initialize_serial():
-    """Inicializa a porta serial"""
-    try:
-        return serial.Serial(app_config.SERIAL_PORT, app_config.BAUD_RATE, timeout=1)
-    except serial.SerialException as e:
-        print(f"Error initializing serial: {e}")
-        return None
-
-
-def process_serial_data(data):
-    """Processa e armazena os dados recebidos"""
-    print(f"Received: {data}")
-    parts = data.split(";")
-    data_dict = {item.split(":")[0]: item.split(":")[1] for item in parts if ":" in item}
-
-    device_status = DeviceStatus(
-        device_id=data_dict.get("DEVICE_ID", "unknown"),
-        ignition=data_dict.get("IGNITION", "Off"),
-        battery_voltage=float(data_dict.get("BATTERY", 0)),
-        min_voltage=float(data_dict.get("MIN_VOLTAGE", 0)),
-        relay1_status=data_dict.get("RELAY1", "Off"),
-        relay1_time=float(data_dict.get("RELAY1_TIME", 0)),
-        relay2_status=data_dict.get("RELAY2", "Off"),
-        relay2_time=float(data_dict.get("RELAY2_TIME", 0)),
-        gps_status=data_dict.get("GPS_STATUS", "Invalid"),
-        timestamp=datetime.utcnow(),
-    )
-
-    device_location = DeviceLocation(
-        device_id=data_dict.get("DEVICE_ID", "unknown"),
-        latitude=float(data_dict.get("LAT", 0)),
-        longitude=float(data_dict.get("LNG", 0)),
-        speed=float(data_dict.get("SPEED", 0)),
-        hdop=float(data_dict.get("HDOP", 0)),
-        sats=int(data_dict.get("SATS", 0)),
-        timestamp=datetime.utcnow(),
-    )
-
-    db = SessionLocal()
-    try:
-        db.add(device_status)
-        # Just save the location if it's valid
-        if device_location.latitude != 0 and device_location.longitude != 0:
-            db.add(device_location)
-        db.commit()
-    finally:
-        db.close()
-
-    # Send acknowledgment back to ESP32
-    return "ACK"
-
-
-def read_serial_data():
-    """Lê dados seriais em background"""
-    ser = initialize_serial()
+def send_serial_command(command: str) -> bool:
+    """
+    Envia comando via serial (compatibilidade com código antigo)
     
-    while True:
+    DEPRECATED: Use serial_manager.send_command_sync() diretamente
+    """
+    manager = get_serial_manager()
+    
+    if not manager.is_running():
+        logger.error("SerialManager não está em execução")
+        return False
+        
+    # Enviar comando e aguardar ACK
+    return manager.send_command_sync(command, wait_for_ack=True, timeout=2.0)
+
+
+def process_serial_data(data: str):
+    """
+    Processa e armazena os dados de status recebidos do ESP32
+    Formato: DEVICE_ID:xxx;IGNITION:On;BATTERY:12.5;...
+    """
+    try:
+        logger.debug(f"Processando dados: {data}")
+        
+        # Parse dos dados
+        parts = data.split(";")
+        data_dict = {}
+        
+        for item in parts:
+            if ":" in item:
+                key, value = item.split(":", 1)
+                data_dict[key] = value
+
+        # Criar registro de status
+        device_status = DeviceStatus(
+            device_id=data_dict.get("DEVICE_ID", "unknown"),
+            ignition=data_dict.get("IGNITION", "Off"),
+            battery_voltage=float(data_dict.get("BATTERY", 0)),
+            min_voltage=float(data_dict.get("MIN_VOLTAGE", 0)),
+            relay1_status=data_dict.get("RELAY1", "Off"),
+            relay1_time=float(data_dict.get("RELAY1_TIME", 0)),
+            relay2_status=data_dict.get("RELAY2", "Off"),
+            relay2_time=float(data_dict.get("RELAY2_TIME", 0)),
+            gps_status=data_dict.get("GPS_STATUS", "Invalid"),
+            timestamp=datetime.utcnow(),
+        )
+
+        # Criar registro de localização (se disponível)
+        device_location = None
+        if "LAT" in data_dict and "LNG" in data_dict:
+            device_location = DeviceLocation(
+                device_id=data_dict.get("DEVICE_ID", "unknown"),
+                latitude=float(data_dict.get("LAT", 0)),
+                longitude=float(data_dict.get("LNG", 0)),
+                speed=float(data_dict.get("SPEED", 0)),
+                hdop=float(data_dict.get("HDOP", 0)),
+                sats=int(data_dict.get("SATS", 0)),
+                timestamp=datetime.utcnow(),
+            )
+
+        # Salvar no banco de dados
+        db = SessionLocal()
         try:
-            with serial_lock:  # Lock for safe read
-                if ser and ser.in_waiting:
-                    line = ser.readline().decode().strip()
-                    if line and line != "ACK" and line.startswith("DEVICE_ID"):
-                        ack = process_serial_data(line)
-                        if ser:
-                            ser.write(f'{ack}\n'.encode())
-        except serial.SerialException as e:
-            print(f"Serial Exception: {e}")
-            time.sleep(5)  # Wait before retrying
-            ser = initialize_serial()  # Reinitialize the serial connection
-        except Exception as e:
-            print(f"Error in serial monitoring: {e}")
-            time.sleep(1)
+            db.add(device_status)
+            
+            # Salvar localização apenas se for válida
+            if device_location and device_location.latitude != 0 and device_location.longitude != 0:
+                db.add(device_location)
+                
+            db.commit()
+            logger.info(f"✅ Status do dispositivo {device_status.device_id} salvo")
+            
+            # Enviar ACK para o ESP32
+            manager = get_serial_manager()
+            manager.send_command("ACK")
+            
+        finally:
+            db.close()
+            
+    except Exception as e:
+        logger.error(f"❌ Erro ao processar dados seriais: {e}")
+
+
+def handle_esp32_ready(data: str):
+    """Callback para quando ESP32 está pronto"""
+    logger.info("✅ ESP32 está pronto e inicializado")
+
+
+def handle_heartbeat_timeout(data: str):
+    """Callback para timeout de heartbeat"""
+    logger.warning("⚠️ ESP32 reportou HEARTBEAT_TIMEOUT - aplicação pode ter falhado")
+
+
+def handle_debug_message(data: str):
+    """Callback para mensagens de debug do ESP32"""
+    logger.debug(f"[ESP32] {data}")
+
+
+def handle_unknown_message(data: str):
+    """Callback para mensagens não reconhecidas"""
+    logger.warning(f"⚠️ Mensagem não reconhecida: {data}")
 
 
 def start_serial_monitoring():
-    """Inicia o monitoramento serial em thread separada"""
-    threading.Thread(target=read_serial_data, daemon=True).start()
-    print("Serial monitoring started") 
+    """
+    Inicia o monitoramento serial usando SerialManager
+    Registra callbacks para processar diferentes tipos de mensagens
+    """
+    logger.info("🚀 Iniciando monitoramento serial com SerialManager")
+    
+    # Obter instância do SerialManager
+    manager = get_serial_manager()
+    
+    # Registrar callbacks para cada tipo de mensagem
+    manager.register_callback(MessageType.STATUS_DATA, process_serial_data)
+    manager.register_callback(MessageType.ESP32_READY, handle_esp32_ready)
+    manager.register_callback(MessageType.HEARTBEAT_TIMEOUT, handle_heartbeat_timeout)
+    manager.register_callback(MessageType.DEBUG, handle_debug_message)
+    manager.register_callback(MessageType.UNKNOWN, handle_unknown_message)
+    
+    # Iniciar o SerialManager se ainda não estiver rodando
+    if not manager.is_running():
+        manager.start()
+        
+    logger.info("✅ Monitoramento serial iniciado") 

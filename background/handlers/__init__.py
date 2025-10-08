@@ -14,6 +14,7 @@ from .database_handler import DatabaseHandler
 from .frigate_handler import FrigateHandler
 from .new_video_handler import NewVideoHandler
 from .detection_handler import DetectionHandler
+from .status_handler import StatusHandler
 
 __all__ = [
     "MQTTHandler",
@@ -21,5 +22,6 @@ __all__ = [
     "DatabaseHandler",
     "FrigateHandler",
     "NewVideoHandler",
-    "DetectionHandler"
+    "DetectionHandler",
+    "StatusHandler"
 ] 

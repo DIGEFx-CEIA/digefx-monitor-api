@@ -9,7 +9,7 @@ from typing import Dict, Any
 
 from .event_system import EventType
 from .handlers import (
-    MQTTHandler, AMQPHandler, DatabaseHandler, FrigateHandler, NewVideoHandler, DetectionHandler
+    MQTTHandler, AMQPHandler, DatabaseHandler, FrigateHandler, NewVideoHandler, DetectionHandler, StatusHandler
 )
 from .event_system import event_bus
 
@@ -91,7 +91,12 @@ class EventHandlerManager:
             await self.handlers['detection'].initialize()
             logger.info("✅ DetectionHandler inicializado")
             
-            # 4. MQTT Handler (se configurado)
+            # 4. Status Handler (monitora sistema e comunica com ESP32)
+            self.handlers['status'] = StatusHandler()
+            await self.handlers['status'].initialize()
+            logger.info("✅ StatusHandler inicializado")
+            
+            # 5. MQTT Handler (se configurado)
             if 'mqtt' in handler_configs:
                 config = handler_configs['mqtt']
                 self.handlers['mqtt'] = MQTTHandler(
