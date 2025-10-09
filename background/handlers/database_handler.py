@@ -11,7 +11,8 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy import select, update
 
 from ..event_system import AlertEvent, EventType
-from models import Camera, CameraAlert, AlertType, SessionLocal
+from models import Camera, CameraAlert, AlertType
+from config import get_db_session
 
 logger = logging.getLogger(__name__)
 
@@ -25,14 +26,11 @@ class DatabaseHandler:
         """Inicializa o handler do banco de dados"""
         try:
             # Testar conexão com o banco
-            db = SessionLocal()
-            try:
+            with get_db_session() as db:
                 # Testar query simples
                 cameras = db.query(Camera).limit(1).all()
                 self.is_initialized = True
                 logger.info("Database Handler inicializado")
-            finally:
-                db.close()
             
         except Exception as e:
             logger.error(f"Erro ao inicializar Database Handler: {e}")
@@ -45,49 +43,46 @@ class DatabaseHandler:
     async def handle_event(self, event: AlertEvent) -> bool:
         """Processa evento de alerta salvando no banco de dados"""
         try:
-            db = SessionLocal()
-            try:
-                # Validar se a câmera existe
-                camera = db.query(Camera).filter(Camera.id == event.camera_id).first()
-                if not camera:
-                    logger.warning(f"Câmera {event.camera_id} não encontrada no banco")
+            with get_db_session() as db:
+                try:
+                    # Validar se a câmera existe
+                    camera = db.query(Camera).filter(Camera.id == event.camera_id).first()
+                    if not camera:
+                        logger.warning(f"Câmera {event.camera_id} não encontrada no banco")
+                        return False
+                    
+                    # Validar se o tipo de alerta existe
+                    alert_type = db.query(AlertType).filter(AlertType.id == event.alert_type_id).first()
+                    if not alert_type:
+                        logger.warning(f"Tipo de alerta {event.alert_type_id} não encontrado no banco")
+                        return False
+                    
+                    # Criar registro de alerta
+                    camera_alert = CameraAlert(
+                        camera_id=event.camera_id,
+                        alert_type_id=event.alert_type_id,
+                        triggered_at=event.detected_at,
+                        # corrige conversão do Dict para Json quando tem datetime dentro do dicionário
+                        alert_metadata=event.metadata
+                    )
+                    
+                    # Salvar no banco
+                    db.add(camera_alert)
+                    db.commit()
+                    db.refresh(camera_alert)
+                    
+                    logger.info(f"Alerta salvo no banco - ID: {camera_alert.id}, "
+                              f"Câmera: {event.camera_name}, Tipo: {event.alert_type_code}")
+                    
+                    # Atualizar estatísticas da câmera (opcional)
+                    self._update_camera_stats(db, camera, event)
+                    
+                    return True
+                    
+                except Exception as e:
+                    db.rollback()
+                    logger.error(f"Erro ao salvar alerta no banco: {e}")
                     return False
-                
-                # Validar se o tipo de alerta existe
-                alert_type = db.query(AlertType).filter(AlertType.id == event.alert_type_id).first()
-                if not alert_type:
-                    logger.warning(f"Tipo de alerta {event.alert_type_id} não encontrado no banco")
-                    return False
-                
-                # Criar registro de alerta
-                camera_alert = CameraAlert(
-                    camera_id=event.camera_id,
-                    alert_type_id=event.alert_type_id,
-                    triggered_at=event.detected_at,
-                    # corrige conversão do Dict para Json quando tem datetime dentro do dicionário
-                    alert_metadata=event.metadata
-                )
-                
-                # Salvar no banco
-                db.add(camera_alert)
-                db.commit()
-                db.refresh(camera_alert)
-                
-                logger.info(f"Alerta salvo no banco - ID: {camera_alert.id}, "
-                          f"Câmera: {event.camera_name}, Tipo: {event.alert_type_code}")
-                
-                # Atualizar estatísticas da câmera (opcional)
-                self._update_camera_stats(db, camera, event)
-                
-                return True
-                
-            except Exception as e:
-                db.rollback()
-                logger.error(f"Erro ao salvar alerta no banco: {e}")
-                return False
-                
-            finally:
-                db.close()
                 
         except Exception as e:
             logger.error(f"Erro geral no Database Handler: {e}")
@@ -114,7 +109,7 @@ class DatabaseHandler:
             }
         }
     
-    def _update_camera_stats(self, db: SessionLocal, camera: Camera, event: AlertEvent):
+    def _update_camera_stats(self, db, camera: Camera, event: AlertEvent):
         """Atualiza estatísticas da câmera (opcional)"""
         try:
             # Calcular estatísticas simples

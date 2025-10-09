@@ -1,6 +1,7 @@
 """
 Configuração do banco de dados
 """
+from contextlib import contextmanager
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
@@ -14,7 +15,12 @@ DATABASE_URL = app_config.get_database_url()
 # Configuração da engine do SQLAlchemy
 engine = create_engine(
     DATABASE_URL,
-    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
+    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {},
+    pool_size=20,           # Aumentar pool base
+    max_overflow=30,        # Aumentar overflow
+    pool_timeout=60,        # Aumentar timeout
+    pool_recycle=3600,      # Reciclar conexões a cada hora
+    pool_pre_ping=True      # Verificar conexões antes de usar
 )
 
 # Configuração da sessão
@@ -26,6 +32,16 @@ Base = declarative_base()
 
 def get_database():
     """Dependency para obter sessão do banco de dados"""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+@contextmanager
+def get_db_session():
+    """Context manager para gerenciar sessões do banco de dados"""
     db = SessionLocal()
     try:
         yield db

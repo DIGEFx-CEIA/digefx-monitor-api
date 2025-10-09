@@ -1,13 +1,14 @@
 
 import logging
 import time
+import os
 from typing import Dict, Optional
 
 import mediapipe as mp
 import cv2
 from ..event_system import NewVideoFileEvent, create_trigger_detection_event, event_bus
-from config import app_config
-from models import Camera, SessionLocal
+from config import app_config, get_db_session
+from models import Camera
 
 
 logger = logging.getLogger(__name__)
@@ -33,23 +34,48 @@ class NewVideoHandler:
     async def cleanup(self):
         """Limpa recursos do handler"""
         logger.info("Video Handler finalizado")
+
+    def wait_for_file_complete(self, file_path: str, max_wait: int = 30) -> bool:
+        """Aguarda arquivo estar completamente escrito"""
+        start_time = time.time()
+        last_size = 0
+        
+        while time.time() - start_time < max_wait:
+            if not os.path.exists(file_path):
+                time.sleep(1)
+                continue
+                
+            current_size = os.path.getsize(file_path)
+            if current_size > 0 and current_size == last_size:
+                # Arquivo parou de crescer, assumir que está completo
+                time.sleep(2)  # Aguardar mais 2 segundos para garantir
+                return True
+                
+            last_size = current_size
+            time.sleep(1)
+        
+        return False
     
     async def handle_event(self, event: NewVideoFileEvent) -> bool:
         """Processa evento de novo arquivo de vídeo"""
         try:
             logger.info(f"Novo arquivo de vídeo recebido: {event.file_path} às {event.timestamp}")
             # verificar se existe camera ativa cadastrada com esse nome
-            db = SessionLocal()
-            camera_name = event.file_path.split("/")[-2] if "/" in event.file_path else "unknown_camera"
-            existent_camera = db.query(Camera).filter(Camera.name == camera_name, Camera.is_active == True).first()
-            if not existent_camera:
-                logger.info(f"Câmera {camera_name} não encontrada no banco de dados. Evento ignorado.")
-                return False
-            logger.info(f"Câmera {existent_camera.name} encontrada no banco de dados. Processando vídeo...")
-            event.camera = existent_camera
+            with get_db_session() as db:
+                camera_name = event.file_path.split("/")[-2] if "/" in event.file_path else "unknown_camera"
+                existent_camera = db.query(Camera).filter(Camera.name == camera_name, Camera.is_active == True).first()
+                if not existent_camera:
+                    logger.info(f"Câmera {camera_name} não encontrada no banco de dados. Evento ignorado.")
+                    return False
+                logger.info(f"Câmera {existent_camera.name} encontrada no banco de dados. Processando vídeo...")
+                event.camera = existent_camera
 
             # TODO: Verificar se já foi processado
             start_time = time.time()
+            
+            if not self.wait_for_file_complete(event.file_path):
+                logger.error(f"Arquivo não ficou completo: {event.file_path}")
+                return False
             
             cap = cv2.VideoCapture(event.file_path)
             

@@ -1,6 +1,6 @@
-FROM python:3.11-slim
+FROM python:3.10
 
-# Instala dependências do sistema para serial, banco, build e execução no host
+# Instala dependências do sistema para serial, banco, build, execução no host e bibliotecas gráficas
 RUN apt-get update && apt-get install -y \
     build-essential \
     libpq-dev \
@@ -19,6 +19,10 @@ WORKDIR /app
 # Copia dependências e instala
 COPY requirements.txt .
 RUN pip install -r requirements.txt
+
+RUN pip uninstall -y opencv-python
+RUN pip uninstall -y opencv-contrib-python
+RUN pip install opencv-contrib-python-headless==4.11.0.86
 
 # Copia o restante da aplicação
 COPY . .

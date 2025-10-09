@@ -7,11 +7,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 
 import cv2
+import os
 import numpy as np
 from ultralytics import YOLO
 from ..event_system import TriggerDetectionEvent, event_bus, create_alert_event
-from config import app_config
-from models import SessionLocal, CameraAlert, CameraType
+from config import app_config, get_db_session
+from models import CameraAlert, CameraType
 
 
 logger = logging.getLogger(__name__)
@@ -202,6 +203,10 @@ class DetectionHandler:
             if not event.camera or not event.camera.is_active:
                 logger.info(f"Câmera {event.camera.name} não está ativa. Evento ignorado.")
                 return False
+            
+            if not self.wait_for_file_complete(event.file_path):
+                logger.error(f"Arquivo não ficou completo: {event.file_path}")
+                return False
                 
             logger.info(f"Alertas habilitados: {event.camera.enabled_alerts}")
 
@@ -216,6 +221,27 @@ class DetectionHandler:
         except Exception as e:
             logger.error(f"Erro ao processar evento de detecção: {e}")
             return False
+        
+    def wait_for_file_complete(self, file_path: str, max_wait: int = 30) -> bool:
+        """Aguarda arquivo estar completamente escrito"""
+        start_time = time.time()
+        last_size = 0
+        
+        while time.time() - start_time < max_wait:
+            if not os.path.exists(file_path):
+                time.sleep(1)
+                continue
+                
+            current_size = os.path.getsize(file_path)
+            if current_size > 0 and current_size == last_size:
+                # Arquivo parou de crescer, assumir que está completo
+                time.sleep(2)  # Aguardar mais 2 segundos para garantir
+                return True
+                
+            last_size = current_size
+            time.sleep(1)
+        
+        return False
         
     async def process_video_parallel(self, event: TriggerDetectionEvent) -> Dict[str, int]:
         """Processa vídeo de forma paralela usando múltiplos cores"""
@@ -432,7 +458,9 @@ class DetectionHandler:
                     continue
                 
                 # Verificar se atingiu o threshold (10% dos frames)
+                logger.warning(f"Verificando alertas para {alert_type}: {count} em {total_frames} frames com threshold {self.detection_threshold*100}% e skip_frames {self.skip_frames}")
                 percentage = (count / total_frames) * self.skip_frames
+                logger.warning(f"Alerta {alert_type}: {count} em {total_frames} frames ({percentage*100:.1f}%)")
                 if percentage >= self.detection_threshold:
                     logger.info(f"Alerta {alert_type}: {count * self.skip_frames}/{total_frames} frames ({percentage*100:.1f}%)")
                     
@@ -450,25 +478,22 @@ class DetectionHandler:
     async def should_trigger_alert(self, camera_id: int, alert_type: str) -> bool:
         """Verifica cooldown de alertas"""
         try:
-            db = SessionLocal()
-            
-            # Buscar último alerta deste tipo para esta câmera
-            cutoff_time = datetime.utcnow() - timedelta(hours=self.alert_cooldown_hours)
-            
-            recent_alert = db.query(CameraAlert).filter(
-                CameraAlert.camera_id == camera_id,
-                CameraAlert.triggered_at > cutoff_time
-            ).join(CameraAlert.alert_type).filter(
-                CameraAlert.alert_type.has(code=alert_type)
-            ).first()
-            
-            db.close()
-            
-            should_trigger = recent_alert is None
-            if not should_trigger:
-                logger.debug(f"Alerta {alert_type} em cooldown até {recent_alert.triggered_at + timedelta(hours=self.alert_cooldown_hours)}")
-            
-            return should_trigger
+            with get_db_session() as db:
+                # Buscar último alerta deste tipo para esta câmera
+                cutoff_time = datetime.utcnow() - timedelta(hours=self.alert_cooldown_hours)
+                
+                recent_alert = db.query(CameraAlert).filter(
+                    CameraAlert.camera_id == camera_id,
+                    CameraAlert.triggered_at > cutoff_time
+                ).join(CameraAlert.alert_type).filter(
+                    CameraAlert.alert_type.has(code=alert_type)
+                ).first()
+                
+                should_trigger = recent_alert is None
+                if not should_trigger:
+                    logger.debug(f"Alerta {alert_type} em cooldown até {recent_alert.triggered_at + timedelta(hours=self.alert_cooldown_hours)}")
+                
+                return should_trigger
             
         except Exception as e:
             logger.error(f"Erro ao verificar cooldown: {e}")
@@ -479,40 +504,37 @@ class DetectionHandler:
         try:
             # Buscar informações do tipo de alerta
             from models import AlertType
-            db = SessionLocal()
             
-            alert_type_obj = db.query(AlertType).filter(AlertType.code == alert_type).first()
-            if not alert_type_obj:
-                logger.warning(f"Tipo de alerta {alert_type} não encontrado no banco")
-                db.close()
-                return
-            
-            # Criar evento de alerta
-            alert_event = create_alert_event(
-                camera_id=event.camera.id,
-                camera_name=event.camera.name,
-                camera_ip=event.camera.ip_address,
-                alert_type_code=alert_type,
-                alert_type_name=alert_type_obj.name,
-                alert_type_id=alert_type_obj.id,
-                severity=alert_type_obj.severity,
-                confidence=percentage,  # Usar percentual como confiança
-                metadata={
-                    "video_file": event.file_path,
-                    "detection_count": count,
-                    "total_frames": total_frames,
-                    "detection_percentage": percentage,
-                    "processing_timestamp": event.timestamp.isoformat(),
-                    "cooldown_hours": self.alert_cooldown_hours
-                }
-            )
-            
-            # Publicar no event bus
-            await event_bus.publish(alert_event)
-            
-            logger.info(f"Alerta {alert_type} publicado para câmera {event.camera.name} - {count}/{total_frames} frames ({percentage*100:.1f}%)")
-            
-            db.close()
+            with get_db_session() as db:
+                alert_type_obj = db.query(AlertType).filter(AlertType.code == alert_type).first()
+                if not alert_type_obj:
+                    logger.warning(f"Tipo de alerta {alert_type} não encontrado no banco")
+                    return
+                
+                # Criar evento de alerta
+                alert_event = create_alert_event(
+                    camera_id=event.camera.id,
+                    camera_name=event.camera.name,
+                    camera_ip=event.camera.ip_address,
+                    alert_type_code=alert_type,
+                    alert_type_name=alert_type_obj.name,
+                    alert_type_id=alert_type_obj.id,
+                    severity=alert_type_obj.severity,
+                    confidence=percentage,  # Usar percentual como confiança
+                    metadata={
+                        "video_file": event.file_path,
+                        "detection_count": count,
+                        "total_frames": total_frames,
+                        "detection_percentage": percentage,
+                        "processing_timestamp": event.timestamp.isoformat(),
+                        "cooldown_hours": self.alert_cooldown_hours
+                    }
+                )
+                
+                # Publicar no event bus
+                await event_bus.publish(alert_event)
+                
+                logger.info(f"Alerta {alert_type} publicado para câmera {event.camera.name} - {count}/{total_frames} frames ({percentage*100:.1f}%)")
             
         except Exception as e:
             logger.error(f"Erro ao criar e publicar alerta: {e}")

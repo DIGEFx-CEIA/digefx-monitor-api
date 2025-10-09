@@ -118,11 +118,10 @@ class BackgroundManager:
             
             # 1. Criar e inicializar o gerenciador de handlers
             self.handler_manager = EventHandlerManager()
-            await self.handler_manager.initialize()
+            await self.handler_manager.initialize(
+                handler_configs=app_config.get_event_handler_configs()
+            )
             logger.info("✅ EventHandlerManager inicializado")
-            
-            # 2. Sistema simplificado - handlers já inicializados e registrados no EventBus
-            # Não precisa de processamento adicional - tudo é baseado em eventos
             
             # 3. Marcar como inicializado
             self._startup_completed = True

@@ -57,6 +57,17 @@ class AppConfig:
     MQTT_BROKER: str = os.getenv("MQTT_BROKER", "localhost")
     MQTT_PORT: int = int(os.getenv("MQTT_PORT", "1883"))
     MQTT_TOPIC: str = os.getenv("MQTT_TOPIC", "device/status")
+    MQTT_USERNAME: str = os.getenv("MQTT_USERNAME", )
+    MQTT_PASSWORD: str = os.getenv("MQTT_PASSWORD")
+    MQTT_DISABLED: bool = os.getenv("MQTT_DISABLED", "false").lower() == "true"
+
+    # Configurações AMQP
+    AMQP_URL: str = os.getenv("AMQP_URL", "amqp://guest:guest@localhost:5672/")
+    AMQP_DISABLED: bool = os.getenv("AMQP_DISABLED", "false").lower() == "true"
+
+    # Configurações Frigate
+    FRIGATE_URL: str = os.getenv("FRIGATE_URL", "http://localhost:5000")
+    FRIGATE_DISABLED: bool = os.getenv("FRIGATE_DISABLED", "false").lower() == "true"
     
     # Configurações de serial
     SERIAL_PORT: str = os.getenv("SERIAL_PORT", "/dev/ttyUSB0")
@@ -145,6 +156,32 @@ class AppConfig:
         cls.METADATA_DIR.mkdir(exist_ok=True)
         cls.LOGS_DIR.mkdir(exist_ok=True)
         cls.VIDEO_DIR.mkdir(exist_ok=True)
+
+    @classmethod
+    def get_event_handler_configs(cls) -> dict:
+        """Retorna configurações específicas para handlers de eventos"""
+        return {
+            "database": {
+                "enabled": True,
+                "database_url": cls.DATABASE_URL
+            },
+            "mqtt": {
+                "enabled": cls.MQTT_DISABLED == False,
+                "broker_host": cls.MQTT_BROKER,
+                "broker_port": cls.MQTT_PORT,
+                "username": cls.MQTT_USERNAME,
+                "password": cls.MQTT_PASSWORD,
+                "topic_prefix": cls.MQTT_TOPIC
+            },
+            "amqp": {
+                "enabled": cls.AMQP_DISABLED == False,
+                "amqp_url": cls.AMQP_URL
+            },
+            "frigate": {
+                "enabled": cls.FRIGATE_DISABLED == False,
+                "frigate_base_url": cls.FRIGATE_URL
+            }
+        }
 
 
 # Instância global da configuração

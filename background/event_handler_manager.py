@@ -96,7 +96,7 @@ class EventHandlerManager:
             # StatusHandler foi movido para os monitores básicos
             
             # 5. MQTT Handler (se configurado)
-            if 'mqtt' in handler_configs:
+            if 'mqtt' in handler_configs and handler_configs['mqtt'].get('enabled', True):
                 config = handler_configs['mqtt']
                 self.handlers['mqtt'] = MQTTHandler(
                     broker_host=config.get('broker_host', 'localhost'),
@@ -108,7 +108,7 @@ class EventHandlerManager:
                 logger.info("✅ MQTTHandler inicializado")
             
             # 5. AMQP Handler (se configurado)
-            if 'amqp' in handler_configs:
+            if 'amqp' in handler_configs and handler_configs['amqp'].get('enabled', True):
                 config = handler_configs['amqp']
                 self.handlers['amqp'] = AMQPHandler(
                     amqp_url=config.get('amqp_url', 'amqp://guest:guest@localhost:5672/')
@@ -117,7 +117,7 @@ class EventHandlerManager:
                 logger.info("✅ AMQPHandler inicializado")
             
             # 6. Frigate Handler (se configurado)
-            if 'frigate' in handler_configs:
+            if 'frigate' in handler_configs and handler_configs['frigate'].get('enabled', True):
                 config = handler_configs['frigate']
                 self.handlers['frigate'] = FrigateHandler(
                     frigate_base_url=config.get('frigate_base_url', 'http://localhost:5000')

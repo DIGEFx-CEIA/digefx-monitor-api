@@ -2,9 +2,10 @@
 Processamento de novos arquivos de vídeo
 """
 
-import asyncio
 from datetime import datetime
 import logging
+import os
+import time
 from typing import Dict
 from .event_system import create_new_video_file_event, event_bus
 
@@ -37,11 +38,35 @@ async def process_new_video(video_path: str):
     except Exception as e:
         logger.error(f"Erro ao processar novo vídeo {video_path}: {e}")
 
+def wait_for_file_complete(file_path: str, max_wait: int = 30) -> bool:
+        """Aguarda arquivo estar completamente escrito"""
+        start_time = time.time()
+        last_size = 0
+        
+        while time.time() - start_time < max_wait:
+            if not os.path.exists(file_path):
+                time.sleep(1)
+                continue
+                
+            current_size = os.path.getsize(file_path)
+            if current_size > 0 and current_size == last_size:
+                # Arquivo parou de crescer, assumir que está completo
+                time.sleep(2)  # Aguardar mais 2 segundos para garantir
+                return True
+                
+            last_size = current_size
+            time.sleep(1)
+        
+        return False
 
 def get_video_info(video_path: str) -> Dict:
     """Extrai informações básicas do vídeo"""
     try:
         cap = cv2.VideoCapture(video_path)
+        
+        if not wait_for_file_complete(video_path):
+            logger.error(f"Arquivo não ficou completo: {video_path}")
+            return False
         
         if not cap.isOpened():
             raise Exception(f"Não foi possível abrir o vídeo: {video_path}")
