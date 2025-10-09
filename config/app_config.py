@@ -59,7 +59,7 @@ class AppConfig:
     MQTT_TOPIC: str = os.getenv("MQTT_TOPIC", "device/status")
     
     # Configurações de serial
-    SERIAL_PORT: str = os.getenv("SERIAL_PORT", "/dev/ttyACM0")
+    SERIAL_PORT: str = os.getenv("SERIAL_PORT", "/dev/ttyUSB0")
     SERIAL_BAUDRATE: int = int(os.getenv("SERIAL_BAUDRATE", "115200"))  # Corrigido para 115200
     BAUD_RATE: int = SERIAL_BAUDRATE  # Alias para compatibilidade
     SERIAL_TIMEOUT: int = int(os.getenv("SERIAL_TIMEOUT", "1"))
