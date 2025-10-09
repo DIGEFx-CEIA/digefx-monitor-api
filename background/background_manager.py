@@ -12,6 +12,7 @@ from .serial_monitor import start_serial_monitoring
 from .serial_manager import get_serial_manager, shutdown_serial_manager
 from .camera_monitor import start_camera_monitoring
 from .file_processor import process_new_video
+from .handlers.status_handler import StatusHandler
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 import asyncio
@@ -68,6 +69,7 @@ class BackgroundManager:
     
     def __init__(self):
         self.handler_manager: Optional[EventHandlerManager] = None
+        self.status_handler: Optional[StatusHandler] = None
         self._is_running = False
         self._startup_completed = False
         self._monitors_started = False
@@ -77,15 +79,31 @@ class BackgroundManager:
     async def startup(self):
         """Inicialização não-bloqueante do sistema de background"""
         try:
-            logger.info("🚀 Iniciando Background Manager (modo não-bloqueante)...")
+            execution_mode = app_config.get_execution_mode()
+            logger.info(f"🚀 Iniciando Background Manager (modo: {execution_mode})...")
             
-            # 1. Iniciar monitores básicos imediatamente (síncronos)
-            self._start_basic_monitors()
-            self._start_file_monitoring()
-            # 2. Iniciar inicialização completa em background
-            self._initialization_task = asyncio.create_task(self._initialize_background_systems())
+            # 1. Iniciar monitores básicos se habilitados
+            if app_config.should_enable_basic_monitors():
+                self._start_basic_monitors()
+                # Iniciar StatusHandler junto com os monitores básicos
+                asyncio.create_task(self._start_status_handler())
+            else:
+                logger.info("⏭️ Monitores básicos desabilitados por feature flag")
             
-            # 3. Retornar imediatamente - não aguardar a inicialização completa
+            # 2. Iniciar monitoramento de arquivos se habilitado
+            if app_config.should_enable_file_monitoring():
+                self._start_file_monitoring()
+            else:
+                logger.info("⏭️ Monitoramento de arquivos desabilitado por feature flag")
+            
+            # 3. Iniciar sistemas de background se habilitados
+            if app_config.should_enable_background_systems():
+                self._initialization_task = asyncio.create_task(self._initialize_background_systems())
+            else:
+                logger.info("⏭️ Sistemas de background desabilitados por feature flag")
+                self._startup_completed = True  # Marcar como completo se não há sistemas de background
+            
+            # 4. Retornar imediatamente - não aguardar a inicialização completa
             logger.info("✅ Background Manager startup iniciado - sistemas inicializando em background...")
             
         except Exception as e:
@@ -115,7 +133,7 @@ class BackgroundManager:
             self._startup_completed = True  # Marcar como completo mesmo com erro
     
     def _start_basic_monitors(self):
-        """Inicia os monitores básicos (host, serial, camera)"""
+        """Inicia os monitores básicos (host, serial, camera) e StatusHandler"""
         try:
             logger.info("📊 Iniciando monitores básicos...")
             
@@ -138,29 +156,50 @@ class BackgroundManager:
             logger.error(f"❌ Erro ao iniciar monitores básicos: {e}")
             # Continuar mesmo com erro nos monitores
 
-    def _start_file_monitoring(self):
-        # Configurar observador para novos arquivos
-        event_handler = VideoFileHandler(self)
-        
-        # Passar o loop de eventos atual para o handler
+    async def _start_status_handler(self):
+        """Inicia o StatusHandler junto com os monitores básicos"""
         try:
-            current_loop = asyncio.get_running_loop()
-            event_handler.set_event_loop(current_loop)
-            logger.info("Loop de eventos configurado para o VideoFileHandler")
-        except RuntimeError:
-            # Se não há loop rodando, tentar obter o loop padrão
+            logger.info("📡 Iniciando Status Handler...")
+            
+            self.status_handler = StatusHandler()
+            await self.status_handler.initialize()
+            logger.info("✅ Status Handler iniciado")
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao iniciar Status Handler: {e}")
+            # Continuar mesmo com erro no StatusHandler
+
+    def _start_file_monitoring(self):
+        """Inicia o monitoramento de arquivos de vídeo"""
+        try:
+            logger.info("📁 Iniciando monitoramento de arquivos...")
+            
+            # Configurar observador para novos arquivos
+            event_handler = VideoFileHandler(self)
+            
+            # Passar o loop de eventos atual para o handler
             try:
-                current_loop = asyncio.get_event_loop()
+                current_loop = asyncio.get_running_loop()
                 event_handler.set_event_loop(current_loop)
-                logger.warning("Usando loop de eventos padrão para VideoFileHandler")
-            except Exception as e:
-                logger.error(f"Não foi possível configurar loop de eventos: {e}")
-        
-        self.observer = Observer()
-        self.observer.schedule(event_handler, str(app_config.VIDEO_DIR), recursive=True)
-        # Iniciar monitoramento
-        self.observer.start()
-        logger.info(f"Monitoramento iniciado na pasta {app_config.VIDEO_DIR}. Aguardando novos arquivos...")
+                logger.info("Loop de eventos configurado para o VideoFileHandler")
+            except RuntimeError:
+                # Se não há loop rodando, tentar obter o loop padrão
+                try:
+                    current_loop = asyncio.get_event_loop()
+                    event_handler.set_event_loop(current_loop)
+                    logger.warning("Usando loop de eventos padrão para VideoFileHandler")
+                except Exception as e:
+                    logger.error(f"Não foi possível configurar loop de eventos: {e}")
+            
+            self.observer = Observer()
+            self.observer.schedule(event_handler, str(app_config.VIDEO_DIR), recursive=True)
+            # Iniciar monitoramento
+            self.observer.start()
+            logger.info(f"✅ Monitoramento de arquivos iniciado na pasta {app_config.VIDEO_DIR}")
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao iniciar monitoramento de arquivos: {e}")
+            # Continuar mesmo com erro no monitoramento de arquivos
     
     async def _start_alert_processing(self):
         """Inicia o processamento de alertas em background"""
@@ -178,8 +217,8 @@ class BackgroundManager:
         try:
             logger.info("🛑 Finalizando Background Manager...")
             
-            # Parar o observer de arquivos
-            if hasattr(self, 'observer') and self.observer:
+            # Parar o observer de arquivos se foi iniciado
+            if hasattr(self, 'observer') and self.observer and app_config.should_enable_file_monitoring():
                 self.observer.stop()
                 self.observer.join()
                 logger.info("✅ File Observer finalizado")
@@ -192,17 +231,26 @@ class BackgroundManager:
                 except asyncio.CancelledError:
                     logger.info("Task de inicialização cancelada")
             
-            # Finalizar EventHandlerManager
-            if self.handler_manager:
+            # Finalizar EventHandlerManager se foi iniciado
+            if self.handler_manager and app_config.should_enable_background_systems():
                 await self.handler_manager.cleanup()
                 logger.info("✅ EventHandlerManager finalizado")
             
-            # Finalizar SerialManager
-            try:
-                shutdown_serial_manager()
-                logger.info("✅ SerialManager finalizado")
-            except Exception as e:
-                logger.error(f"⚠️ Erro ao finalizar SerialManager: {e}")
+            # Finalizar StatusHandler se foi iniciado
+            if self.status_handler and app_config.should_enable_basic_monitors():
+                try:
+                    await self.status_handler.cleanup()
+                    logger.info("✅ StatusHandler finalizado")
+                except Exception as e:
+                    logger.error(f"⚠️ Erro ao finalizar StatusHandler: {e}")
+            
+            # Finalizar SerialManager se os monitores básicos foram iniciados
+            if app_config.should_enable_basic_monitors():
+                try:
+                    shutdown_serial_manager()
+                    logger.info("✅ SerialManager finalizado")
+                except Exception as e:
+                    logger.error(f"⚠️ Erro ao finalizar SerialManager: {e}")
             
             # Nota: Os outros monitores básicos continuam rodando (threads daemon)
             # Eles serão finalizados automaticamente quando a aplicação parar
@@ -231,6 +279,8 @@ class BackgroundManager:
     
     def get_status(self) -> dict:
         """Status atual do sistema"""
+        execution_mode = app_config.get_execution_mode()
+        
         if not self._startup_completed:
             initialization_status = "starting"
             if self._initialization_task:
@@ -241,12 +291,15 @@ class BackgroundManager:
             
             return {
                 "status": initialization_status,
+                "execution_mode": execution_mode,
                 "message": "Sistema inicializando em background..." if initialization_status == "initializing" else "Sistema iniciando..."
             }
         
-        if not self.handler_manager:
+        # Verificar se EventHandlerManager é necessário
+        if app_config.should_enable_background_systems() and not self.handler_manager:
             return {
                 "status": "error",
+                "execution_mode": execution_mode,
                 "message": "EventHandlerManager não inicializado"
             }
         
@@ -257,15 +310,26 @@ class BackgroundManager:
             # Status geral do sistema
             system_status = {
                 "status": "running",  # Background Manager está sempre running após startup
+                "execution_mode": execution_mode,
                 "startup_completed": self._startup_completed,
+                "feature_flags": {
+                    "api_enabled": app_config.should_enable_api(),
+                    "basic_monitors_enabled": app_config.should_enable_basic_monitors(),
+                    "file_monitoring_enabled": app_config.should_enable_file_monitoring(),
+                    "background_systems_enabled": app_config.should_enable_background_systems()
+                },
                 "basic_monitors": {
-                    "host_monitor": self._monitors_started,
-                    "serial_monitor": self._monitors_started,
-                    "camera_monitor": self._monitors_started,
-                    "status": "running" if self._monitors_started else "stopped"
+                    "host_monitor": self._monitors_started if app_config.should_enable_basic_monitors() else False,
+                    "serial_monitor": self._monitors_started if app_config.should_enable_basic_monitors() else False,
+                    "camera_monitor": self._monitors_started if app_config.should_enable_basic_monitors() else False,
+                    "status_handler": self.status_handler is not None and self.status_handler.is_initialized if app_config.should_enable_basic_monitors() else False,
+                    "status": "running" if self._monitors_started and app_config.should_enable_basic_monitors() else "disabled"
+                },
+                "file_monitoring": {
+                    "status": "running" if hasattr(self, 'observer') and self.observer and app_config.should_enable_file_monitoring() else "disabled"
                 },
                 "event_handlers": {
-                    "status": "running" if handler_stats.get("is_initialized") else "stopped",
+                    "status": "running" if handler_stats.get("is_initialized") and app_config.should_enable_background_systems() else "disabled",
                     **handler_stats
                 }
             }
@@ -275,6 +339,7 @@ class BackgroundManager:
         except Exception as e:
             return {
                 "status": "error",
+                "execution_mode": execution_mode,
                 "message": f"Erro ao obter status: {str(e)}"
             }
     
@@ -284,7 +349,16 @@ class BackgroundManager:
     
     @property
     def is_ready(self) -> bool:
-        return self._startup_completed and self.handler_manager is not None and self.handler_manager.is_ready()
+        # Verificar se os sistemas necessários estão prontos
+        basic_ready = True
+        if app_config.should_enable_basic_monitors():
+            basic_ready = self._monitors_started and (self.status_handler is None or self.status_handler.is_initialized)
+        
+        background_ready = True
+        if app_config.should_enable_background_systems():
+            background_ready = self.handler_manager is not None and self.handler_manager.is_ready()
+        
+        return self._startup_completed and basic_ready and background_ready
     
     @property
     def monitors_running(self) -> bool:

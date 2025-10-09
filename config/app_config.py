@@ -77,6 +77,15 @@ class AppConfig:
     # Configurações de CORS
     CORS_ORIGINS: list = os.getenv("CORS_ORIGINS", "*").split(",")
     
+    # Feature Flags - Sistema de separação de funcionalidades
+    ENABLE_API: bool = os.getenv("ENABLE_API", "true").lower() == "true"
+    ENABLE_BASIC_MONITORS: bool = os.getenv("ENABLE_BASIC_MONITORS", "true").lower() == "true"
+    ENABLE_FILE_MONITORING: bool = os.getenv("ENABLE_FILE_MONITORING", "true").lower() == "true"
+    ENABLE_BACKGROUND_SYSTEMS: bool = os.getenv("ENABLE_BACKGROUND_SYSTEMS", "true").lower() == "true"
+    
+    # Configurações de modo de execução
+    EXECUTION_MODE: str = os.getenv("EXECUTION_MODE", "full")  # full, api_only, background_only, monitors_only
+    
     @classmethod
     def get_database_url(cls) -> str:
         """Retorna URL do banco de dados"""
@@ -91,6 +100,44 @@ class AppConfig:
     def is_debug(cls) -> bool:
         """Verifica se está em modo debug"""
         return cls.DEBUG
+    
+    @classmethod
+    def get_execution_mode(cls) -> str:
+        """Retorna o modo de execução baseado nas feature flags"""
+        if cls.EXECUTION_MODE != "full":
+            return cls.EXECUTION_MODE
+        
+        # Auto-detectar modo baseado nas feature flags
+        if cls.ENABLE_API and cls.ENABLE_BASIC_MONITORS and cls.ENABLE_FILE_MONITORING and cls.ENABLE_BACKGROUND_SYSTEMS:
+            return "full"
+        elif cls.ENABLE_API and cls.ENABLE_BASIC_MONITORS and not cls.ENABLE_FILE_MONITORING and not cls.ENABLE_BACKGROUND_SYSTEMS:
+            return "api_only"
+        elif not cls.ENABLE_API and cls.ENABLE_BASIC_MONITORS and not cls.ENABLE_FILE_MONITORING and not cls.ENABLE_BACKGROUND_SYSTEMS:
+            return "monitors_only"
+        elif not cls.ENABLE_API and not cls.ENABLE_BASIC_MONITORS and cls.ENABLE_FILE_MONITORING and cls.ENABLE_BACKGROUND_SYSTEMS:
+            return "background_only"
+        else:
+            return "custom"
+    
+    @classmethod
+    def should_enable_api(cls) -> bool:
+        """Verifica se a API deve ser habilitada"""
+        return cls.ENABLE_API
+    
+    @classmethod
+    def should_enable_basic_monitors(cls) -> bool:
+        """Verifica se os monitores básicos devem ser habilitados"""
+        return cls.ENABLE_BASIC_MONITORS
+    
+    @classmethod
+    def should_enable_file_monitoring(cls) -> bool:
+        """Verifica se o monitoramento de arquivos deve ser habilitado"""
+        return cls.ENABLE_FILE_MONITORING
+    
+    @classmethod
+    def should_enable_background_systems(cls) -> bool:
+        """Verifica se os sistemas de background devem ser habilitados"""
+        return cls.ENABLE_BACKGROUND_SYSTEMS
 
     @classmethod
     def ensure_directories(cls):

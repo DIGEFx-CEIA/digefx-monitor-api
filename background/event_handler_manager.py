@@ -9,7 +9,7 @@ from typing import Dict, Any
 
 from .event_system import EventType
 from .handlers import (
-    MQTTHandler, AMQPHandler, DatabaseHandler, FrigateHandler, NewVideoHandler, DetectionHandler, StatusHandler
+    MQTTHandler, AMQPHandler, DatabaseHandler, FrigateHandler, NewVideoHandler, DetectionHandler
 )
 from .event_system import event_bus
 
@@ -24,6 +24,8 @@ class EventHandlerManager:
     - Inicializar handlers de eventos (Database, NewVideo, Detection, MQTT, AMQP, Frigate)
     - Registrar handlers no EventBus
     - Gerenciar lifecycle dos handlers
+    
+    Nota: StatusHandler foi movido para os monitores básicos
     """
     
     def __init__(self):
@@ -91,10 +93,7 @@ class EventHandlerManager:
             await self.handlers['detection'].initialize()
             logger.info("✅ DetectionHandler inicializado")
             
-            # 4. Status Handler (monitora sistema e comunica com ESP32)
-            self.handlers['status'] = StatusHandler()
-            await self.handlers['status'].initialize()
-            logger.info("✅ StatusHandler inicializado")
+            # StatusHandler foi movido para os monitores básicos
             
             # 5. MQTT Handler (se configurado)
             if 'mqtt' in handler_configs:

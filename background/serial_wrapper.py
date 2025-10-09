@@ -200,3 +200,6 @@ class SerialFileDescriptor:
     def rts(self, value):
         pass  # Não implementado (proposital)
 
+
+
+
